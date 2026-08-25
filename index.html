@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>資源教室經費管理系統</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="loginView" class="center-page">
+    <div class="login-card">
+      <div class="brand-mark">資</div>
+      <h1>資源教室經費管理系統</h1>
+      <p>明新科技大學資源教室｜內部經費登錄與管理</p>
+      <button id="loginBtn" class="primary-btn">使用 Google 帳號登入</button>
+      <p class="hint">僅限已授權之資源教室教師使用</p>
+    </div>
+  </div>
+
+  <div id="appView" class="app hidden">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">MUST RESOURCE ROOM</div>
+        <h1>經費管理系統</h1>
+      </div>
+      <div class="user-box">
+        <div>
+          <strong id="userName">—</strong>
+          <span id="roleBadge" class="role-badge">—</span>
+        </div>
+        <small id="userEmail">—</small>
+        <button id="logoutBtn" class="ghost-btn">登出</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-view="dashboard">總覽</button>
+      <button class="tab" data-view="records">使用紀錄</button>
+      <button class="tab manager-only" data-view="budget">經費編列</button>
+    </nav>
+
+    <main>
+      <section id="dashboard" class="view active-view">
+        <div class="section-head">
+          <div>
+            <h2>經費總覽</h2>
+            <p>依經費科目掌握核定、已使用與剩餘額度。</p>
+          </div>
+        </div>
+        <div id="summaryCards" class="summary-grid"></div>
+        <div class="panel">
+          <div class="panel-head">
+            <h3>經費項目</h3>
+            <span id="categoryCount" class="muted"></span>
+          </div>
+          <div id="budgetTableWrap"></div>
+        </div>
+      </section>
+
+      <section id="records" class="view">
+        <div class="section-head responsive-head">
+          <div>
+            <h2>使用紀錄</h2>
+            <p id="recordsHint">登錄自己已使用並完成學校核銷的經費。</p>
+          </div>
+          <button id="newRecordBtn" class="primary-btn">＋ 新增使用紀錄</button>
+        </div>
+        <div class="panel filters">
+          <select id="filterCategory"><option value="">全部經費項目</option></select>
+          <select id="filterArchive">
+            <option value="">全部歸檔狀態</option>
+            <option value="done">憑證已歸檔</option>
+            <option value="pending">憑證未歸檔</option>
+          </select>
+          <input id="searchInput" placeholder="搜尋用途、老師或核銷單號" />
+        </div>
+        <div id="recordList" class="record-list"></div>
+      </section>
+
+      <section id="budget" class="view manager-only">
+        <div class="section-head responsive-head">
+          <div>
+            <h2>經費編列</h2>
+            <p>僅經費管理員可新增科目、調整名稱與額度。</p>
+          </div>
+          <button id="newCategoryBtn" class="primary-btn">＋ 新增經費項目</button>
+        </div>
+        <div class="panel">
+          <div id="categoryAdminList"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="recordDialog">
+    <form id="recordForm" method="dialog" class="dialog-form">
+      <div class="dialog-head"><h3 id="recordDialogTitle">新增使用紀錄</h3><button type="button" class="icon-btn" data-close="recordDialog">×</button></div>
+      <input type="hidden" id="recordId" />
+      <label>經費項目<select id="recordCategory" required></select></label>
+      <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：新生座談活動耗材" /></label>
+      <div class="two-cols">
+        <label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label>
+        <label>核銷日期<input id="recordDate" required type="date" /></label>
+      </div>
+      <label>學校請購／核銷單號（可空白）<input id="recordVoucherNo" maxlength="80" /></label>
+      <label>共用資料夾連結（可空白）<input id="recordFolderUrl" type="url" placeholder="https://..." /></label>
+      <label class="check-row"><input id="recordArchived" type="checkbox" /><span>我已將核銷憑證／資料放入共用資料夾</span></label>
+      <label>備註<textarea id="recordNote" rows="3" maxlength="500"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="recordDialog">取消</button><button class="primary-btn" value="default">儲存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="categoryDialog">
+    <form id="categoryForm" method="dialog" class="dialog-form">
+      <div class="dialog-head"><h3 id="categoryDialogTitle">新增經費項目</h3><button type="button" class="icon-btn" data-close="categoryDialog">×</button></div>
+      <input type="hidden" id="categoryId" />
+      <label>項目名稱<input id="categoryName" required maxlength="80" placeholder="例如：教學及耗材費" /></label>
+      <label>核定額度<input id="categoryBudget" required type="number" min="0" step="1" /></label>
+      <label>排序<input id="categoryOrder" type="number" min="0" step="1" value="0" /></label>
+      <label class="check-row"><input id="categoryActive" type="checkbox" checked /><span>啟用此經費項目</span></label>
+      <label>調整備註<textarea id="categoryReason" rows="3" maxlength="300" placeholder="新增或調整額度時可填原因"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="categoryDialog">取消</button><button class="primary-btn" value="default">儲存</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
