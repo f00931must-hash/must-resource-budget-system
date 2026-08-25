@@ -36,6 +36,7 @@
       </label>
       <button id="newPlanBtn" class="primary-btn manager-only">＋ 建立計畫</button>
       <button id="editPlanBtn" class="ghost-btn manager-only">調整計畫</button>
+      <button id="deletePlanBtn" class="ghost-btn manager-only" style="color:#b42318;border-color:#efb2b2">刪除計畫</button>
     </div>
 
     <nav class="tabs">
@@ -68,7 +69,11 @@
       </section>
 
       <section id="budget" class="view manager-only">
-        <div class="section-head responsive-head"><div><h2>經費編列</h2><p>依目前計畫建立經費科目與核定額度。</p></div><button id="newCategoryBtn" class="primary-btn">＋ 新增經費項目</button></div>
+        <div class="section-head responsive-head">
+          <div><h2>經費編列</h2><p>先設定計畫總額，再將額度分配至人事費、教耗材、雜支、資本門等項目。</p></div>
+          <button id="newCategoryBtn" class="primary-btn">＋ 新增經費項目</button>
+        </div>
+        <div id="allocationSummary" class="panel" style="margin-bottom:16px"></div>
         <div class="panel"><div id="categoryAdminList"></div></div>
       </section>
     </main>
@@ -79,7 +84,12 @@
       <div class="dialog-head"><h3 id="planDialogTitle">建立計畫</h3><button type="button" class="icon-btn" data-close="planDialog">×</button></div>
       <input type="hidden" id="planId" />
       <label>計畫名稱<input id="planName" required maxlength="120" placeholder="例如：115年度身心障礙學生輔導工作計畫" /></label>
-      <div class="two-cols"><label>年度<input id="planYear" required placeholder="115" /></label><label>期別<select id="planTerm"><option value="年度">年度</option><option value="上學期">上學期</option><option value="下學期">下學期</option></select></label></div>
+      <div class="two-cols">
+        <label>年度<input id="planYear" required placeholder="115" /></label>
+        <label>期別<select id="planTerm"><option value="年度">年度</option><option value="上學期">上學期</option><option value="下學期">下學期</option></select></label>
+      </div>
+      <label>計畫總核定額度<input id="planTotalBudget" required type="number" min="0" step="1" placeholder="例如：7000000" /></label>
+      <p class="hint">此處填整個計畫的總額；人事費、教耗材、雜支、資本門等額度會從此總額中分配。</p>
       <label class="check-row"><input id="planActive" type="checkbox" checked /><span>啟用此計畫</span></label>
       <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="planDialog">取消</button><button class="primary-btn" value="default">儲存</button></div>
     </form>
@@ -105,7 +115,7 @@
       <div class="dialog-head"><h3 id="categoryDialogTitle">新增經費項目</h3><button type="button" class="icon-btn" data-close="categoryDialog">×</button></div>
       <input type="hidden" id="categoryId" />
       <label>項目名稱<input id="categoryName" required maxlength="80" placeholder="例如：教學及耗材費" /></label>
-      <label>核定額度<input id="categoryBudget" required type="number" min="0" step="1" /></label>
+      <label>編列額度<input id="categoryBudget" required type="number" min="0" step="1" /></label>
       <label>排序<input id="categoryOrder" type="number" min="0" step="1" value="0" /></label>
       <label class="check-row"><input id="categoryActive" type="checkbox" checked /><span>啟用此經費項目</span></label>
       <label>調整備註<textarea id="categoryReason" rows="3" maxlength="300" placeholder="新增或調整額度時可填原因"></textarea></label>
