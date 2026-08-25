@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, query, orderBy, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCsApWkpnJiwCsQsiPK14pgFQdqb88UJjQ",
@@ -28,6 +28,7 @@ document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>swit
 $("planSelect").addEventListener("change", async()=>{ state.activePlanId=$("planSelect").value; await loadPlanData(); renderAll(); });
 $("newPlanBtn").addEventListener("click",openNewPlan);
 $("editPlanBtn").addEventListener("click",openEditPlan);
+$("deletePlanBtn").addEventListener("click",deleteCurrentPlan);
 $("planForm").addEventListener("submit",savePlan);
 $("newRecordBtn").addEventListener("click",openNewRecord);
 $("newCategoryBtn").addEventListener("click",openNewCategory);
@@ -37,61 +38,108 @@ $("categoryForm").addEventListener("submit",saveCategory);
 
 onAuthStateChanged(auth, async user=>{
   state.user=user;
-  if(!user){ $("loginView").classList.remove("hidden"); $("appView").classList.add("hidden"); return; }
+  if(!user){
+    $("loginView").classList.remove("hidden");
+    $("appView").classList.add("hidden");
+    return;
+  }
   try{
     const email=user.email.toLowerCase();
     const snap=await getDoc(doc(db,"users",email));
-    if(!snap.exists() || snap.data().enabled!==true){ await signOut(auth); alert("此 Google 帳號尚未獲授權使用經費系統，請洽經費管理員。"); return; }
+    if(!snap.exists() || snap.data().enabled!==true){
+      await signOut(auth);
+      alert("此 Google 帳號尚未獲授權使用經費系統，請洽經費管理員。");
+      return;
+    }
     state.profile=snap.data();
     $("userName").textContent=state.profile.name||user.displayName||user.email;
     $("userEmail").textContent=user.email;
     $("roleBadge").textContent=isManager()?"經費管理員":"經費使用者";
     document.querySelectorAll(".manager-only").forEach(el=>el.classList.toggle("hidden",!isManager()));
     $("recordsHint").textContent="所有已授權老師都可查看全部使用紀錄；只能修改自己建立的資料。";
-    $("loginView").classList.add("hidden"); $("appView").classList.remove("hidden");
+    $("loginView").classList.add("hidden");
+    $("appView").classList.remove("hidden");
     await loadPlans();
     await loadPlanData();
     renderAll();
-  }catch(e){ console.error(e); toast("讀取系統資料失敗，請檢查 Firestore Rules。",5000); }
+  }catch(e){
+    console.error(e);
+    toast("讀取系統資料失敗，請檢查 Firestore Rules。",5000);
+  }
 });
 
 function isManager(){ return state.profile?.role==="manager"; }
 function currentPlan(){ return state.plans.find(p=>p.id===state.activePlanId); }
+function planTotal(){ return Number(currentPlan()?.totalBudget||0); }
+function allocatedTotal(){ return state.categories.reduce((s,c)=>s+Number(c.budget||0),0); }
+function usedTotal(){ return state.records.reduce((s,r)=>s+Number(r.amount||0),0); }
 
 async function loadPlans(){
   const snap=await getDocs(query(collection(db,"budgetPlans"),orderBy("year","desc")));
   state.plans=snap.docs.map(d=>({id:d.id,...d.data()}));
-  if(!state.activePlanId || !state.plans.some(p=>p.id===state.activePlanId)) state.activePlanId=state.plans.find(p=>p.active!==false)?.id || state.plans[0]?.id || "";
+  if(!state.activePlanId || !state.plans.some(p=>p.id===state.activePlanId)){
+    state.activePlanId=state.plans.find(p=>p.active!==false)?.id || state.plans[0]?.id || "";
+  }
 }
 
 async function loadPlanData(){
   if(!state.activePlanId){ state.categories=[]; state.records=[]; return; }
-  const catSnap=await getDocs(query(collection(db,"budgetCategories"),where("planId","==",state.activePlanId),orderBy("order","asc")));
-  state.categories=catSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const catSnap=await getDocs(query(collection(db,"budgetCategories"),where("planId","==",state.activePlanId)));
+  state.categories=catSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>Number(a.order||0)-Number(b.order||0) || String(a.name||"").localeCompare(String(b.name||""),"zh-Hant"));
   const recSnap=await getDocs(query(collection(db,"expenseRecords"),where("planId","==",state.activePlanId)));
   state.records=recSnap.docs.map(d=>({id:d.id,...d.data()}));
 }
 
-function renderAll(){ renderPlanSelect(); renderDashboard(); renderCategoryOptions(); renderRecords(); if(isManager()) renderCategoryAdmin(); }
+function renderAll(){
+  renderPlanSelect();
+  renderDashboard();
+  renderCategoryOptions();
+  renderRecords();
+  if(isManager()) renderCategoryAdmin();
+}
+
 function renderPlanSelect(){
-  $("planSelect").innerHTML=state.plans.length?state.plans.map(p=>`<option value="${p.id}" ${p.id===state.activePlanId?"selected":""}>${esc(p.year||"")} ${esc(p.term||"")}｜${esc(p.name||"")}${p.active===false?"（停用）":""}</option>`).join(""):'<option value="">尚未建立計畫</option>';
-  $("editPlanBtn").disabled=!state.activePlanId;
+  $("planSelect").innerHTML=state.plans.length
+    ? state.plans.map(p=>`<option value="${p.id}" ${p.id===state.activePlanId?"selected":""}>${esc(p.year||"")} ${esc(p.term||"")}｜${esc(p.name||"")}${p.active===false?"（停用）":""}</option>`).join("")
+    : '<option value="">尚未建立計畫</option>';
+  const disabled=!state.activePlanId;
+  $("editPlanBtn").disabled=disabled;
+  $("deletePlanBtn").disabled=disabled;
 }
 
 function renderDashboard(){
   const plan=currentPlan();
-  $("planSummary").textContent=plan?`${plan.year||""} ${plan.term||""}｜${plan.name||""}`:"請先由經費管理員建立計畫。";
-  const active=state.categories.filter(c=>c.active!==false);
-  const total=active.reduce((s,c)=>s+Number(c.budget||0),0);
-  const used=state.records.reduce((s,r)=>s+Number(r.amount||0),0);
+  $("planSummary").textContent=plan
+    ? `${plan.year||""} ${plan.term||""}｜${plan.name||""}`
+    : "請先由經費管理員建立計畫。";
+
+  const total=planTotal();
+  const allocated=allocatedTotal();
+  const unallocated=total-allocated;
+  const used=usedTotal();
   const pending=state.records.filter(r=>r.archived!==true).reduce((s,r)=>s+Number(r.amount||0),0);
   const remain=total-used;
-  $("summaryCards").innerHTML=[["核定總額",money.format(total)],["已登錄使用",money.format(used)],["尚待憑證歸檔",money.format(pending)],["剩餘額度",money.format(remain)]].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
-  $("categoryCount").textContent=`${active.length} 個項目`;
+
+  $("summaryCards").innerHTML=[
+    ["計畫總核定額度",money.format(total)],
+    ["已編列額度",money.format(allocated)],
+    ["尚未編列",money.format(unallocated)],
+    ["已登錄使用",money.format(used)],
+    ["尚待憑證歸檔",money.format(pending)],
+    ["計畫剩餘額度",money.format(remain)]
+  ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
+
+  $("categoryCount").textContent=`${state.categories.length} 個項目｜已編列 ${money.format(allocated)} / ${money.format(total)}`;
+
   if(!state.activePlanId){ $("budgetTableWrap").innerHTML='<div class="empty">尚未建立計畫。</div>'; return; }
-  if(!active.length){ $("budgetTableWrap").innerHTML='<div class="empty">此計畫尚未建立經費項目。</div>'; return; }
-  const rows=active.map(c=>{ const u=state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+Number(r.amount||0),0); const rem=Number(c.budget||0)-u; return `<tr><td><strong>${esc(c.name)}</strong></td><td class="amount">${money.format(c.budget||0)}</td><td class="amount">${money.format(u)}</td><td class="amount">${money.format(rem)}</td></tr>`; }).join("");
-  $("budgetTableWrap").innerHTML=`<table><thead><tr><th>經費項目</th><th class="amount">核定額度</th><th class="amount">已使用</th><th class="amount">剩餘</th></tr></thead><tbody>${rows}</tbody></table>`;
+  if(!state.categories.length){ $("budgetTableWrap").innerHTML='<div class="empty">此計畫尚未編列經費項目。</div>'; return; }
+
+  const rows=state.categories.filter(c=>c.active!==false).map(c=>{
+    const u=state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+Number(r.amount||0),0);
+    const rem=Number(c.budget||0)-u;
+    return `<tr><td><strong>${esc(c.name)}</strong></td><td class="amount">${money.format(c.budget||0)}</td><td class="amount">${money.format(u)}</td><td class="amount">${money.format(rem)}</td></tr>`;
+  }).join("");
+  $("budgetTableWrap").innerHTML=`<table><thead><tr><th>經費項目</th><th class="amount">編列額度</th><th class="amount">已使用</th><th class="amount">剩餘</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderCategoryOptions(){
@@ -104,79 +152,317 @@ function renderCategoryOptions(){
 }
 
 function renderRecords(){
-  const cat=$("filterCategory").value, arch=$("filterArchive").value, term=$("searchInput").value.trim().toLowerCase();
+  const cat=$("filterCategory").value;
+  const arch=$("filterArchive").value;
+  const term=$("searchInput").value.trim().toLowerCase();
   let rows=[...state.records];
   if(cat) rows=rows.filter(r=>r.categoryId===cat);
   if(arch==="done") rows=rows.filter(r=>r.archived===true);
   if(arch==="pending") rows=rows.filter(r=>r.archived!==true);
   if(term) rows=rows.filter(r=>[r.purpose,r.ownerName,r.ownerEmail,r.voucherNo].some(v=>String(v||"").toLowerCase().includes(term)));
   rows.sort((a,b)=>String(b.expenseDate||"").localeCompare(String(a.expenseDate||"")));
+
   if(!state.activePlanId){ $("recordList").innerHTML='<div class="panel empty">尚未建立計畫。</div>'; return; }
   if(!rows.length){ $("recordList").innerHTML='<div class="panel empty">目前沒有符合條件的使用紀錄。</div>'; return; }
+
   $("recordList").innerHTML=rows.map(r=>{
     const c=state.categories.find(x=>x.id===r.categoryId);
     const canEdit=isManager()||r.ownerEmail===state.user.email.toLowerCase();
-    return `<article class="record-card"><div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(r.ownerName||r.ownerEmail||"")}</small></div><div><strong>${money.format(r.amount||0)}</strong><small>${esc(r.expenseDate||"")}</small></div><div><span class="status ${r.archived?'done':'pending'}">${r.archived?'憑證已歸檔':'待憑證歸檔'}</span></div><div><small>核銷單號</small><div>${esc(r.voucherNo||"—")}</div></div><div class="record-actions">${r.folderUrl?`<a class="link-btn" target="_blank" rel="noopener" href="${escAttr(r.folderUrl)}">資料夾</a>`:""}${canEdit?`<button class="link-btn" data-edit-record="${r.id}">編輯</button>`:""}</div></article>`;
+    return `<article class="record-card">
+      <div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(r.ownerName||r.ownerEmail||"")}</small></div>
+      <div><strong>${money.format(r.amount||0)}</strong><small>${esc(r.expenseDate||"")}</small></div>
+      <div><span class="status ${r.archived?'done':'pending'}">${r.archived?'憑證已歸檔':'待憑證歸檔'}</span></div>
+      <div><small>核銷單號</small><div>${esc(r.voucherNo||"—")}</div></div>
+      <div class="record-actions">${r.folderUrl?`<a class="link-btn" target="_blank" rel="noopener" href="${escAttr(r.folderUrl)}">資料夾</a>`:""}${canEdit?`<button class="link-btn" data-edit-record="${r.id}">編輯</button>`:""}</div>
+    </article>`;
   }).join("");
   document.querySelectorAll("[data-edit-record]").forEach(b=>b.addEventListener("click",()=>openEditRecord(b.dataset.editRecord)));
 }
 
 function renderCategoryAdmin(){
+  const total=planTotal();
+  const allocated=allocatedTotal();
+  $("allocationSummary").innerHTML=state.activePlanId
+    ? `<strong>計畫總額：${money.format(total)}</strong>　已編列：${money.format(allocated)}　尚未編列：${money.format(total-allocated)}`
+    : "請先建立計畫。";
+
   if(!state.activePlanId){ $("categoryAdminList").innerHTML='<div class="empty">請先建立計畫。</div>'; return; }
   if(!state.categories.length){ $("categoryAdminList").innerHTML='<div class="empty">此計畫尚未建立經費項目。</div>'; return; }
-  $("categoryAdminList").innerHTML=state.categories.map(c=>{ const used=state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+Number(r.amount||0),0); return `<div class="admin-row"><div><strong>${esc(c.name)}</strong><small>${c.active===false?'已停用':'啟用中'}</small></div><div><small>核定額度</small><strong>${money.format(c.budget||0)}</strong></div><div><small>已使用</small><strong>${money.format(used)}</strong></div><div><button class="link-btn" data-edit-category="${c.id}">調整</button></div></div>`; }).join("");
+
+  $("categoryAdminList").innerHTML=state.categories.map(c=>{
+    const used=state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+Number(r.amount||0),0);
+    return `<div class="admin-row">
+      <div><strong>${esc(c.name)}</strong><small>${c.active===false?'已停用':'啟用中'}</small></div>
+      <div><small>編列額度</small><strong>${money.format(c.budget||0)}</strong></div>
+      <div><small>已使用</small><strong>${money.format(used)}</strong></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+        <button class="link-btn" data-edit-category="${c.id}">調整</button>
+        <button class="link-btn" data-delete-category="${c.id}" style="color:#b42318">刪除</button>
+      </div>
+    </div>`;
+  }).join("");
   document.querySelectorAll("[data-edit-category]").forEach(b=>b.addEventListener("click",()=>openEditCategory(b.dataset.editCategory)));
+  document.querySelectorAll("[data-delete-category]").forEach(b=>b.addEventListener("click",()=>deleteCategory(b.dataset.deleteCategory)));
 }
 
-function openNewPlan(){ $("planForm").reset(); $("planId").value=""; $("planYear").value="115"; $("planActive").checked=true; $("planDialogTitle").textContent="建立計畫"; $("planDialog").showModal(); }
-function openEditPlan(){ const p=currentPlan(); if(!p)return; $("planId").value=p.id; $("planName").value=p.name||""; $("planYear").value=p.year||""; $("planTerm").value=p.term||"年度"; $("planActive").checked=p.active!==false; $("planDialogTitle").textContent="調整計畫"; $("planDialog").showModal(); }
+function openNewPlan(){
+  $("planForm").reset();
+  $("planId").value="";
+  $("planYear").value="115";
+  $("planTotalBudget").value="";
+  $("planActive").checked=true;
+  $("planDialogTitle").textContent="建立計畫";
+  $("planDialog").showModal();
+}
+
+function openEditPlan(){
+  const p=currentPlan(); if(!p)return;
+  $("planId").value=p.id;
+  $("planName").value=p.name||"";
+  $("planYear").value=p.year||"";
+  $("planTerm").value=p.term||"年度";
+  $("planTotalBudget").value=Number(p.totalBudget||0);
+  $("planActive").checked=p.active!==false;
+  $("planDialogTitle").textContent="調整計畫";
+  $("planDialog").showModal();
+}
+
 async function savePlan(e){
-  e.preventDefault(); if(!isManager()) return;
-  const id=$("planId").value; const old=id?state.plans.find(x=>x.id===id):null;
-  const data={name:$("planName").value.trim(),year:$("planYear").value.trim(),term:$("planTerm").value,active:$("planActive").checked,updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()};
+  e.preventDefault();
+  if(!isManager()) return;
+  const id=$("planId").value;
+  const old=id?state.plans.find(x=>x.id===id):null;
+  const totalBudget=Number($("planTotalBudget").value||0);
+  if(totalBudget<0) return toast("計畫總額不可小於 0");
+  if(id && totalBudget<allocatedTotal()) return toast(`計畫總額不可低於目前已編列的 ${money.format(allocatedTotal())}`,5000);
+
+  const data={
+    name:$("planName").value.trim(),
+    year:$("planYear").value.trim(),
+    term:$("planTerm").value,
+    totalBudget,
+    active:$("planActive").checked,
+    updatedAt:serverTimestamp(),
+    updatedBy:state.user.email.toLowerCase()
+  };
   try{
     let targetId=id;
-    if(id) await updateDoc(doc(db,"budgetPlans",id),data); else { const ref=await addDoc(collection(db,"budgetPlans"),{...data,createdAt:serverTimestamp(),createdBy:state.user.email.toLowerCase()}); targetId=ref.id; }
-    await addDoc(collection(db,"auditLogs"),{type:"budget-plan",targetId,action:id?"update":"create",before:old?{name:old.name,year:old.year,term:old.term,active:old.active}:null,after:{name:data.name,year:data.year,term:data.term,active:data.active},actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()});
-    $("planDialog").close(); await loadPlans(); state.activePlanId=targetId; await loadPlanData(); renderAll(); toast("計畫已儲存");
+    if(id){
+      await updateDoc(doc(db,"budgetPlans",id),data);
+    }else{
+      const ref=await addDoc(collection(db,"budgetPlans"),{...data,createdAt:serverTimestamp(),createdBy:state.user.email.toLowerCase()});
+      targetId=ref.id;
+    }
+    await addDoc(collection(db,"auditLogs"),{
+      type:"budget-plan",targetId,action:id?"update":"create",
+      before:old?{name:old.name,year:old.year,term:old.term,totalBudget:old.totalBudget,active:old.active}:null,
+      after:{name:data.name,year:data.year,term:data.term,totalBudget:data.totalBudget,active:data.active},
+      actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()
+    });
+    $("planDialog").close();
+    await loadPlans();
+    state.activePlanId=targetId;
+    await loadPlanData();
+    renderAll();
+    toast("計畫已儲存");
   }catch(err){ console.error(err); toast(`儲存失敗：${err.message}`,5000); }
 }
 
-function openNewRecord(){ if(!state.activePlanId)return toast("請先建立計畫"); if(!state.categories.some(c=>c.active!==false))return toast("此計畫尚未建立可使用的經費項目"); $("recordForm").reset(); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄"; $("recordDate").value=new Date().toISOString().slice(0,10); $("recordDialog").showModal(); }
-function openEditRecord(id){ const r=state.records.find(x=>x.id===id); if(!r)return; const canEdit=isManager()||r.ownerEmail===state.user.email.toLowerCase(); if(!canEdit)return toast("只能修改自己建立的使用紀錄"); $("recordId").value=id; $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||""; $("recordAmount").value=r.amount||0; $("recordDate").value=r.expenseDate||""; $("recordVoucherNo").value=r.voucherNo||""; $("recordFolderUrl").value=r.folderUrl||""; $("recordArchived").checked=r.archived===true; $("recordNote").value=r.note||""; $("recordDialogTitle").textContent="編輯使用紀錄"; $("recordDialog").showModal(); }
+async function deleteCurrentPlan(){
+  if(!isManager() || !state.activePlanId) return;
+  const plan=currentPlan();
+  if(state.records.length>0){
+    alert("此計畫已經有使用紀錄，為避免誤刪正式經費資料，不能刪除。可改為停用計畫。");
+    return;
+  }
+  if(!confirm(`確定要刪除「${plan?.name||"此計畫"}」嗎？\n\n此動作會同時刪除該計畫底下尚未使用的經費項目。`)) return;
+  if(!confirm("再次確認：刪除後無法復原。確定永久刪除？")) return;
+  try{
+    await addDoc(collection(db,"auditLogs"),{
+      type:"budget-plan",targetId:state.activePlanId,action:"delete",
+      before:{name:plan?.name||"",year:plan?.year||"",term:plan?.term||"",totalBudget:plan?.totalBudget||0},
+      actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()
+    });
+    for(const c of state.categories) await deleteDoc(doc(db,"budgetCategories",c.id));
+    await deleteDoc(doc(db,"budgetPlans",state.activePlanId));
+    state.activePlanId="";
+    state.categories=[];
+    state.records=[];
+    await loadPlans();
+    await loadPlanData();
+    renderAll();
+    toast("計畫已刪除");
+  }catch(err){ console.error(err); toast(`刪除失敗：${err.message}`,5000); }
+}
+
+function openNewRecord(){
+  if(!state.activePlanId)return toast("請先建立計畫");
+  if(!state.categories.some(c=>c.active!==false))return toast("此計畫尚未建立可使用的經費項目");
+  $("recordForm").reset();
+  $("recordId").value="";
+  $("recordDialogTitle").textContent="新增使用紀錄";
+  $("recordDate").value=new Date().toISOString().slice(0,10);
+  $("recordDialog").showModal();
+}
+
+function openEditRecord(id){
+  const r=state.records.find(x=>x.id===id); if(!r)return;
+  const canEdit=isManager()||r.ownerEmail===state.user.email.toLowerCase();
+  if(!canEdit)return toast("只能修改自己建立的使用紀錄");
+  $("recordId").value=id;
+  $("recordCategory").value=r.categoryId||"";
+  $("recordPurpose").value=r.purpose||"";
+  $("recordAmount").value=r.amount||0;
+  $("recordDate").value=r.expenseDate||"";
+  $("recordVoucherNo").value=r.voucherNo||"";
+  $("recordFolderUrl").value=r.folderUrl||"";
+  $("recordArchived").checked=r.archived===true;
+  $("recordNote").value=r.note||"";
+  $("recordDialogTitle").textContent="編輯使用紀錄";
+  $("recordDialog").showModal();
+}
+
 async function saveRecord(e){
   e.preventDefault();
   const id=$("recordId").value;
   const existing=id?state.records.find(x=>x.id===id):null;
-  if(existing && !isManager() && existing.ownerEmail!==state.user.email.toLowerCase()) return toast("無權修改此紀錄");
+  if(existing && !isManager() && existing.ownerEmail!==state.user.email.toLowerCase()) return toast("只能修改自己建立的使用紀錄");
+
+  const categoryId=$("recordCategory").value;
+  const amount=Number($("recordAmount").value||0);
+  const category=state.categories.find(c=>c.id===categoryId);
+  if(!category) return toast("請選擇經費項目");
+  const categoryUsedOther=state.records.filter(r=>r.categoryId===categoryId && r.id!==id).reduce((s,r)=>s+Number(r.amount||0),0);
+  if(categoryUsedOther+amount>Number(category.budget||0)){
+    return toast(`此筆會超過「${category.name}」編列額度，目前最多可登錄 ${money.format(Number(category.budget||0)-categoryUsedOther)}`,6000);
+  }
+
   const data={
-    planId:state.activePlanId, categoryId:$("recordCategory").value, purpose:$("recordPurpose").value.trim(), amount:Number($("recordAmount").value||0), expenseDate:$("recordDate").value,
-    voucherNo:$("recordVoucherNo").value.trim(), folderUrl:$("recordFolderUrl").value.trim(), archived:$("recordArchived").checked, note:$("recordNote").value.trim(),
-    ownerEmail:existing?.ownerEmail||state.user.email.toLowerCase(), ownerName:existing?.ownerName||state.profile.name||state.user.displayName||state.user.email,
-    updatedAt:serverTimestamp(), updatedBy:state.user.email.toLowerCase()
+    planId:state.activePlanId,
+    categoryId,
+    purpose:$("recordPurpose").value.trim(),
+    amount,
+    expenseDate:$("recordDate").value,
+    voucherNo:$("recordVoucherNo").value.trim(),
+    folderUrl:$("recordFolderUrl").value.trim(),
+    archived:$("recordArchived").checked,
+    note:$("recordNote").value.trim(),
+    ownerEmail:existing?.ownerEmail||state.user.email.toLowerCase(),
+    ownerName:existing?.ownerName||state.profile.name||state.user.displayName||state.user.email,
+    createdBy:existing?.createdBy||state.user.email.toLowerCase(),
+    updatedAt:serverTimestamp(),
+    updatedBy:state.user.email.toLowerCase()
   };
   try{
     if(id) await updateDoc(doc(db,"expenseRecords",id),data);
-    else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp(),createdBy:state.user.email.toLowerCase()});
-    $("recordDialog").close(); await loadPlanData(); renderAll(); toast("使用紀錄已儲存");
+    else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
+    $("recordDialog").close();
+    await loadPlanData();
+    renderAll();
+    toast("使用紀錄已儲存");
   }catch(err){ console.error(err); toast(`儲存失敗：${err.message}`,5000); }
 }
 
-function openNewCategory(){ if(!state.activePlanId)return toast("請先建立計畫"); $("categoryForm").reset(); $("categoryId").value=""; $("categoryActive").checked=true; $("categoryDialogTitle").textContent="新增經費項目"; $("categoryDialog").showModal(); }
-function openEditCategory(id){ const c=state.categories.find(x=>x.id===id); if(!c)return; $("categoryId").value=id; $("categoryName").value=c.name||""; $("categoryBudget").value=c.budget||0; $("categoryOrder").value=c.order||0; $("categoryActive").checked=c.active!==false; $("categoryReason").value=""; $("categoryDialogTitle").textContent="調整經費項目"; $("categoryDialog").showModal(); }
+function openNewCategory(){
+  if(!state.activePlanId)return toast("請先建立計畫");
+  if(planTotal()<=0)return toast("請先在「調整計畫」設定計畫總核定額度");
+  $("categoryForm").reset();
+  $("categoryId").value="";
+  $("categoryOrder").value=state.categories.length+1;
+  $("categoryActive").checked=true;
+  $("categoryDialogTitle").textContent="新增經費項目";
+  $("categoryDialog").showModal();
+}
+
+function openEditCategory(id){
+  const c=state.categories.find(x=>x.id===id); if(!c)return;
+  $("categoryId").value=id;
+  $("categoryName").value=c.name||"";
+  $("categoryBudget").value=c.budget||0;
+  $("categoryOrder").value=c.order||0;
+  $("categoryActive").checked=c.active!==false;
+  $("categoryReason").value="";
+  $("categoryDialogTitle").textContent="調整經費項目";
+  $("categoryDialog").showModal();
+}
+
 async function saveCategory(e){
-  e.preventDefault(); if(!isManager()) return;
-  const id=$("categoryId").value; const old=id?state.categories.find(x=>x.id===id):null;
-  const data={planId:state.activePlanId,name:$("categoryName").value.trim(),budget:Number($("categoryBudget").value||0),order:Number($("categoryOrder").value||0),active:$("categoryActive").checked,updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()};
+  e.preventDefault();
+  if(!isManager()) return;
+  const id=$("categoryId").value;
+  const old=id?state.categories.find(x=>x.id===id):null;
+  const budget=Number($("categoryBudget").value||0);
+  const otherAllocated=state.categories.filter(c=>c.id!==id).reduce((s,c)=>s+Number(c.budget||0),0);
+  const total=planTotal();
+  if(total<=0) return toast("請先設定計畫總核定額度");
+  if(otherAllocated+budget>total){
+    return toast(`編列總額不可超過計畫總額 ${money.format(total)}；此項目最多可編列 ${money.format(total-otherAllocated)}`,6000);
+  }
+  const used=id?state.records.filter(r=>r.categoryId===id).reduce((s,r)=>s+Number(r.amount||0),0):0;
+  if(budget<used) return toast(`此項目已使用 ${money.format(used)}，編列額度不可低於已使用金額`,5000);
+
+  const data={
+    planId:state.activePlanId,
+    name:$("categoryName").value.trim(),
+    budget,
+    order:Number($("categoryOrder").value||0),
+    active:$("categoryActive").checked,
+    updatedAt:serverTimestamp(),
+    updatedBy:state.user.email.toLowerCase()
+  };
   try{
     let targetId=id;
-    if(id) await updateDoc(doc(db,"budgetCategories",id),data); else { const ref=await addDoc(collection(db,"budgetCategories"),{...data,createdAt:serverTimestamp(),createdBy:state.user.email.toLowerCase()}); targetId=ref.id; }
-    await addDoc(collection(db,"auditLogs"),{type:"budget-category",targetId,planId:state.activePlanId,action:id?"update":"create",before:old?{name:old.name,budget:old.budget,active:old.active}:null,after:{name:data.name,budget:data.budget,active:data.active},reason:$("categoryReason").value.trim(),actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()});
-    $("categoryDialog").close(); await loadPlanData(); renderAll(); toast("經費項目已儲存");
+    if(id) await updateDoc(doc(db,"budgetCategories",id),data);
+    else {
+      const ref=await addDoc(collection(db,"budgetCategories"),{...data,createdAt:serverTimestamp(),createdBy:state.user.email.toLowerCase()});
+      targetId=ref.id;
+    }
+    await addDoc(collection(db,"auditLogs"),{
+      type:"budget-category",targetId,planId:state.activePlanId,action:id?"update":"create",
+      before:old?{name:old.name,budget:old.budget,active:old.active}:null,
+      after:{name:data.name,budget:data.budget,active:data.active},
+      reason:$("categoryReason").value.trim(),actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()
+    });
+    $("categoryDialog").close();
+    await loadPlanData();
+    renderAll();
+    toast("經費項目已儲存");
   }catch(err){ console.error(err); toast(`儲存失敗：${err.message}`,5000); }
 }
 
-function switchView(id){ document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active-view",v.id===id)); document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===id)); }
-function toast(msg,ms=2500){ const el=$("toast"); el.textContent=msg; el.classList.remove("hidden"); clearTimeout(window.__toastTimer); window.__toastTimer=setTimeout(()=>el.classList.add("hidden"),ms); }
+async function deleteCategory(id){
+  if(!isManager()) return;
+  const c=state.categories.find(x=>x.id===id); if(!c)return;
+  const usedRecords=state.records.filter(r=>r.categoryId===id);
+  if(usedRecords.length>0){
+    alert(`「${c.name}」已有 ${usedRecords.length} 筆使用紀錄，不能刪除。可以改為停用。`);
+    return;
+  }
+  if(!confirm(`確定刪除經費項目「${c.name}」？`)) return;
+  try{
+    await addDoc(collection(db,"auditLogs"),{
+      type:"budget-category",targetId:id,planId:state.activePlanId,action:"delete",
+      before:{name:c.name,budget:c.budget,active:c.active},actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()
+    });
+    await deleteDoc(doc(db,"budgetCategories",id));
+    await loadPlanData();
+    renderAll();
+    toast("經費項目已刪除");
+  }catch(err){ console.error(err); toast(`刪除失敗：${err.message}`,5000); }
+}
+
+function switchView(id){
+  document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active-view",v.id===id));
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===id));
+}
+
+function toast(msg,ms=2500){
+  const el=$("toast");
+  el.textContent=msg;
+  el.classList.remove("hidden");
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer=setTimeout(()=>el.classList.add("hidden"),ms);
+}
+
 function esc(v){ return String(v??"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[m])); }
 function escAttr(v){ return esc(v).replace(/'/g,"&#39;"); }
