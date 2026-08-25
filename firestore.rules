@@ -39,12 +39,11 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
-      allow read: if enabledUser() && (manager() || resource.data.ownerEmail == email());
+      allow read: if enabledUser();
 
       allow create: if enabledUser()
         && request.resource.data.ownerEmail == email()
-        && request.resource.data.createdBy == email()
-        && request.resource.data.updatedBy == email();
+        && request.resource.data.createdBy == email();
 
       allow update: if enabledUser() && (
         manager()
@@ -52,7 +51,6 @@ service cloud.firestore {
           resource.data.ownerEmail == email()
           && request.resource.data.ownerEmail == resource.data.ownerEmail
           && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.updatedBy == email()
         )
       );
 
@@ -61,8 +59,7 @@ service cloud.firestore {
 
     match /auditLogs/{logId} {
       allow read: if manager();
-      allow create: if manager()
-        && request.resource.data.actorEmail == email();
+      allow create: if manager();
       allow update, delete: if false;
     }
   }
