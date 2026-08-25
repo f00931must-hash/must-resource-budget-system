@@ -28,6 +28,11 @@ service cloud.firestore {
       allow create, update, delete: if manager();
     }
 
+    match /budgetPlans/{planId} {
+      allow read: if enabledUser();
+      allow create, update, delete: if manager();
+    }
+
     match /budgetCategories/{categoryId} {
       allow read: if enabledUser();
       allow create, update, delete: if manager();
@@ -35,27 +40,30 @@ service cloud.firestore {
 
     match /expenseRecords/{recordId} {
       allow read: if enabledUser() && (manager() || resource.data.ownerEmail == email());
+
       allow create: if enabledUser()
         && request.resource.data.ownerEmail == email()
-        && request.resource.data.createdBy == email();
-      allow update: if enabledUser()
-        && (manager() || resource.data.ownerEmail == email())
-        && request.resource.data.ownerEmail == resource.data.ownerEmail;
+        && request.resource.data.createdBy == email()
+        && request.resource.data.updatedBy == email();
+
+      allow update: if enabledUser() && (
+        manager()
+        || (
+          resource.data.ownerEmail == email()
+          && request.resource.data.ownerEmail == resource.data.ownerEmail
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.updatedBy == email()
+        )
+      );
+
       allow delete: if manager();
     }
 
     match /auditLogs/{logId} {
       allow read: if manager();
-      allow create: if manager();
+      allow create: if manager()
+        && request.resource.data.actorEmail == email();
       allow update, delete: if false;
-    }
-
-    match /reminderSettings/{docId} {
-      allow read, write: if manager();
-    }
-
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }
