@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function email() {
+      return request.auth.token.email.lower();
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(email()));
+    }
+
+    function enabledUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(email()))
+        && userDoc().data.enabled == true;
+    }
+
+    function manager() {
+      return enabledUser() && userDoc().data.role == 'manager';
+    }
+
+    match /users/{userEmail} {
+      allow read: if enabledUser() && (manager() || userEmail == email());
+      allow create, update, delete: if manager();
+    }
+
+    match /budgetCategories/{categoryId} {
+      allow read: if enabledUser();
+      allow create, update, delete: if manager();
+    }
+
+    match /expenseRecords/{recordId} {
+      allow read: if enabledUser() && (manager() || resource.data.ownerEmail == email());
+      allow create: if enabledUser()
+        && request.resource.data.ownerEmail == email()
+        && request.resource.data.createdBy == email();
+      allow update: if enabledUser()
+        && (manager() || resource.data.ownerEmail == email())
+        && request.resource.data.ownerEmail == resource.data.ownerEmail;
+      allow delete: if manager();
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if manager();
+      allow create: if manager();
+      allow update, delete: if false;
+    }
+
+    match /reminderSettings/{docId} {
+      allow read, write: if manager();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
