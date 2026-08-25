@@ -24,14 +24,19 @@
         <h1>經費管理系統</h1>
       </div>
       <div class="user-box">
-        <div>
-          <strong id="userName">—</strong>
-          <span id="roleBadge" class="role-badge">—</span>
-        </div>
+        <div><strong id="userName">—</strong> <span id="roleBadge" class="role-badge">—</span></div>
         <small id="userEmail">—</small>
         <button id="logoutBtn" class="ghost-btn">登出</button>
       </div>
     </header>
+
+    <div class="panel" style="margin-bottom:16px;display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+      <label style="min-width:280px;flex:1">目前計畫
+        <select id="planSelect"><option value="">尚未建立計畫</option></select>
+      </label>
+      <button id="newPlanBtn" class="primary-btn manager-only">＋ 建立計畫</button>
+      <button id="editPlanBtn" class="ghost-btn manager-only">調整計畫</button>
+    </div>
 
     <nav class="tabs">
       <button class="tab active" data-view="dashboard">總覽</button>
@@ -41,56 +46,44 @@
 
     <main>
       <section id="dashboard" class="view active-view">
-        <div class="section-head">
-          <div>
-            <h2>經費總覽</h2>
-            <p>依經費科目掌握核定、已使用與剩餘額度。</p>
-          </div>
-        </div>
+        <div class="section-head"><div><h2>經費總覽</h2><p id="planSummary">請先選擇計畫。</p></div></div>
         <div id="summaryCards" class="summary-grid"></div>
         <div class="panel">
-          <div class="panel-head">
-            <h3>經費項目</h3>
-            <span id="categoryCount" class="muted"></span>
-          </div>
+          <div class="panel-head"><h3>經費項目</h3><span id="categoryCount" class="muted"></span></div>
           <div id="budgetTableWrap"></div>
         </div>
       </section>
 
       <section id="records" class="view">
         <div class="section-head responsive-head">
-          <div>
-            <h2>使用紀錄</h2>
-            <p id="recordsHint">登錄自己已使用並完成學校核銷的經費。</p>
-          </div>
+          <div><h2>使用紀錄</h2><p id="recordsHint">登錄自己已使用並完成學校核銷的經費。</p></div>
           <button id="newRecordBtn" class="primary-btn">＋ 新增使用紀錄</button>
         </div>
         <div class="panel filters">
           <select id="filterCategory"><option value="">全部經費項目</option></select>
-          <select id="filterArchive">
-            <option value="">全部歸檔狀態</option>
-            <option value="done">憑證已歸檔</option>
-            <option value="pending">憑證未歸檔</option>
-          </select>
+          <select id="filterArchive"><option value="">全部歸檔狀態</option><option value="done">憑證已歸檔</option><option value="pending">憑證未歸檔</option></select>
           <input id="searchInput" placeholder="搜尋用途、老師或核銷單號" />
         </div>
         <div id="recordList" class="record-list"></div>
       </section>
 
       <section id="budget" class="view manager-only">
-        <div class="section-head responsive-head">
-          <div>
-            <h2>經費編列</h2>
-            <p>僅經費管理員可新增科目、調整名稱與額度。</p>
-          </div>
-          <button id="newCategoryBtn" class="primary-btn">＋ 新增經費項目</button>
-        </div>
-        <div class="panel">
-          <div id="categoryAdminList"></div>
-        </div>
+        <div class="section-head responsive-head"><div><h2>經費編列</h2><p>依目前計畫建立經費科目與核定額度。</p></div><button id="newCategoryBtn" class="primary-btn">＋ 新增經費項目</button></div>
+        <div class="panel"><div id="categoryAdminList"></div></div>
       </section>
     </main>
   </div>
+
+  <dialog id="planDialog">
+    <form id="planForm" method="dialog" class="dialog-form">
+      <div class="dialog-head"><h3 id="planDialogTitle">建立計畫</h3><button type="button" class="icon-btn" data-close="planDialog">×</button></div>
+      <input type="hidden" id="planId" />
+      <label>計畫名稱<input id="planName" required maxlength="120" placeholder="例如：115年度身心障礙學生輔導工作計畫" /></label>
+      <div class="two-cols"><label>年度<input id="planYear" required placeholder="115" /></label><label>期別<select id="planTerm"><option value="年度">年度</option><option value="上學期">上學期</option><option value="下學期">下學期</option></select></label></div>
+      <label class="check-row"><input id="planActive" type="checkbox" checked /><span>啟用此計畫</span></label>
+      <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="planDialog">取消</button><button class="primary-btn" value="default">儲存</button></div>
+    </form>
+  </dialog>
 
   <dialog id="recordDialog">
     <form id="recordForm" method="dialog" class="dialog-form">
@@ -98,10 +91,7 @@
       <input type="hidden" id="recordId" />
       <label>經費項目<select id="recordCategory" required></select></label>
       <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：新生座談活動耗材" /></label>
-      <div class="two-cols">
-        <label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label>
-        <label>核銷日期<input id="recordDate" required type="date" /></label>
-      </div>
+      <div class="two-cols"><label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label><label>核銷日期<input id="recordDate" required type="date" /></label></div>
       <label>學校請購／核銷單號（可空白）<input id="recordVoucherNo" maxlength="80" /></label>
       <label>共用資料夾連結（可空白）<input id="recordFolderUrl" type="url" placeholder="https://..." /></label>
       <label class="check-row"><input id="recordArchived" type="checkbox" /><span>我已將核銷憑證／資料放入共用資料夾</span></label>
