@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>資源教室經費管理系統</title>
-  <link rel="stylesheet" href="./styles.css?v=1.1.0" />
+  <link rel="stylesheet" href="./styles.css?v=1.1.1" />
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
@@ -115,7 +115,7 @@
         <label>核銷單據（可空白）
           <input id="recordVoucherFile" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" />
         </label>
-        <p class="hint">支援 PDF／圖片，單檔最多 15 MB。選擇後會自動以 AI OCR 比對「粘貼憑證用紙」的合計金額。</p>
+        <p class="hint">支援 PDF／圖片，單檔最多 15 MB。選擇後會自動以 AI OCR 比對「粘貼憑證用紙」的合計金額；附件使用既有免費 GitHub 上傳服務，不使用 Firebase Storage。</p>
         <div id="existingVoucherBox" class="existing-voucher hidden"></div>
         <div id="aiAmountCheck" class="ai-check hidden"></div>
         <label id="amountConfirmWrap" class="check-row confirm-row hidden">
@@ -144,6 +144,6 @@
   </dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script type="module" src="./app.js?v=1.1.0"></script>
+  <script type="module" src="./app-loader.js?v=1.0.0"></script>
 </body>
 </html>
