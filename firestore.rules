@@ -54,7 +54,10 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if manager();
+      allow delete: if enabledUser() && (
+        manager()
+        || resource.data.ownerEmail == email()
+      );
     }
 
     match /auditLogs/{logId} {
