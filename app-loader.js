@@ -85,6 +85,61 @@ async function loadBudgetApp(){
     uploadReplacement
   );
 
+  const amountParserReplacement = [
+    'function parseVoucherAmount(text){',
+    '  const raw=String(text||"").replace(/[，]/g,",");',
+    '  const cleaned=raw',
+    '    .replace(/\\b(?:19|20)\\d{2}\\s*(?:[-\\/.年]|\\s)\\s*\\d{1,2}\\s*(?:[-\\/.月]|\\s)\\s*\\d{1,2}(?:\\s*日)?\\b/g," ")',
+    '    .replace(/\\b1\\d{2}\\s*(?:[-\\/.年]|\\s)\\s*\\d{1,2}\\s*(?:[-\\/.月]|\\s)\\s*\\d{1,2}(?:\\s*日)?\\b/g," ");',
+    '  const compact=cleaned.replace(/\\s+/g," ");',
+    '  const candidates=[];',
+    '',
+    '  const pushCandidate=(value,score,reason)=>{',
+    '    const n=Number(String(value||"").replace(/[,\\s$]/g,""));',
+    '    if(!Number.isFinite(n)||n<=0||n>99999999) return;',
+    '    candidates.push({n,score,reason});',
+    '  };',
+    '',
+    '  for(const key of compact.matchAll(/合\\s*計|總\\s*計/g)){',
+    '    const start=Math.max(0,(key.index||0)-18);',
+    '    const windowText=compact.slice(start,(key.index||0)+120);',
+    '    const keyPos=Math.max(0,(key.index||0)-start);',
+    '    for(const m of windowText.matchAll(/\\$?\\s*(\\d{1,3}(?:,\\d{3})+|\\d{1,8})/g)){',
+    '      const token=m[1];',
+    '      const pos=m.index||0;',
+    '      const distance=Math.abs(pos-keyPos);',
+    '      let score=60-Math.min(distance,50);',
+    '      if(token.includes(",")) score+=18;',
+    '      if(pos>=keyPos) score+=12;',
+    '      pushCandidate(token,score,"合計附近");',
+    '    }',
+    '  }',
+    '',
+    '  const amountLabelIndex=compact.search(/金\\s*額/);',
+    '  if(amountLabelIndex>=0){',
+    '    const zone=compact.slice(amountLabelIndex,amountLabelIndex+260);',
+    '    for(const m of zone.matchAll(/(?:^|[^0-9])((?:\\d\\s+){2,7}\\d)(?=$|[^0-9])/g)){',
+    '      const digits=m[1].replace(/\\s+/g,"");',
+    '      if(digits.length>=3&&digits.length<=8) pushCandidate(digits,58,"上方金額格");',
+    '    }',
+    '  }',
+    '',
+    '  if(!candidates.length) return null;',
+    '  const frequency=new Map();',
+    '  for(const c of candidates) frequency.set(c.n,(frequency.get(c.n)||0)+1);',
+    '  for(const c of candidates){',
+    '    c.score+=(frequency.get(c.n)-1)*25;',
+    '  }',
+    '  candidates.sort((a,b)=>b.score-a.score);',
+    '  return candidates[0].n;',
+    '}'
+  ].join("\n");
+
+  source = source.replace(
+    /function parseVoucherAmount\(text\)\{[\s\S]*?\n\}\n\nasync function ocrImageSource/,
+    amountParserReplacement + '\n\nasync function ocrImageSource'
+  );
+
   source = source.replace(
     '    if(r.voucherStoragePath){\n      await deleteObject(storageRef(storage,r.voucherStoragePath)).catch(()=>{});\n    }',
     '    const oldVoucherPath=r.voucherStoragePath||r.voucherPath||githubPathFromUrl(r.voucherUrl||"");\n    if(oldVoucherPath){\n      await githubDeleteFile(oldVoucherPath,r.voucherFileName||"voucher").catch(()=>{});\n    }'
@@ -115,6 +170,9 @@ async function loadBudgetApp(){
   }
   if(!source.includes('form.append("subfolder", "budget/reimbursement-vouchers")')){
     throw new Error("免費附件模式載入失敗：上傳模組未正確套用。");
+  }
+  if(!source.includes('上方金額格')){
+    throw new Error("核銷金額辨識修正版未正確套用。");
   }
 
   const blob = new Blob([source], {type:"text/javascript"});
