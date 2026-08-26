@@ -23,6 +23,12 @@ service cloud.firestore {
       return enabledUser() && userDoc().data.role == 'manager';
     }
 
+    function recordLocked() {
+      return resource.data.get('reviewStatus', 'pending') == 'approved'
+        || resource.data.get('reviewed', false) == true
+        || resource.data.get('locked', false) == true;
+    }
+
     match /users/{userEmail} {
       allow read: if enabledUser() && (manager() || userEmail == email());
       allow create, update, delete: if manager();
@@ -43,20 +49,30 @@ service cloud.firestore {
 
       allow create: if enabledUser()
         && request.resource.data.ownerEmail == email()
-        && request.resource.data.createdBy == email();
+        && request.resource.data.createdBy == email()
+        && request.resource.data.get('reviewStatus', 'pending') != 'approved'
+        && request.resource.data.get('reviewed', false) == false
+        && request.resource.data.get('locked', false) == false;
 
       allow update: if enabledUser() && (
         manager()
         || (
           resource.data.ownerEmail == email()
+          && !recordLocked()
           && request.resource.data.ownerEmail == resource.data.ownerEmail
           && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.get('reviewStatus', 'pending') != 'approved'
+          && request.resource.data.get('reviewed', false) == false
+          && request.resource.data.get('locked', false) == false
         )
       );
 
       allow delete: if enabledUser() && (
         manager()
-        || resource.data.ownerEmail == email()
+        || (
+          resource.data.ownerEmail == email()
+          && !recordLocked()
+        )
       );
     }
 
