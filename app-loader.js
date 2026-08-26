@@ -110,7 +110,7 @@ async function loadBudgetApp(){
     '    if(uploaded?.path) await githubDeleteFile(uploaded.path,uploaded.name||"voucher").catch(()=>{});'
   );
 
-  if(source.includes("getStorage(") || source.includes("uploadBytes(") || source.includes("deleteObject("))){
+  if(source.includes("getStorage(") || source.includes("uploadBytes(") || source.includes("deleteObject(")){
     throw new Error("免費附件模式載入失敗：仍偵測到 Firebase Storage 程式。");
   }
   if(!source.includes('form.append("subfolder", "budget/reimbursement-vouchers")')){
