@@ -2,8 +2,16 @@ import { getApps, getApp } from "https://www.gstatic.com/firebasejs/12.2.1/fireb
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import { getFirestore, doc, getDoc, getDocs, updateDoc, addDoc, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
-const app = getApps().length ? getApp() : null;
-if (!app) throw new Error("Firebase 尚未初始化");
+async function waitForFirebaseApp(timeoutMs=12000){
+  const started=Date.now();
+  while(Date.now()-started<timeoutMs){
+    if(getApps().length) return getApp();
+    await new Promise(resolve=>setTimeout(resolve,80));
+  }
+  throw new Error("Firebase 初始化逾時");
+}
+
+const app = await waitForFirebaseApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 const money = new Intl.NumberFormat("zh-TW", { style:"currency", currency:"TWD", maximumFractionDigits:0 });
@@ -40,7 +48,7 @@ async function refreshAndPatch(){
     patchTodoCounts();
     patchPlanAttachmentPurgeButton();
   }catch(err){
-    console.warn("budget v1.2.2 patch refresh failed", err);
+    console.warn("budget v1.2.5 patch refresh failed", err);
   }
 }
 
