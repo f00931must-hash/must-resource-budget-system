@@ -29,17 +29,29 @@ service cloud.firestore {
         || resource.data.get('locked', false) == true;
     }
 
+    function amountConfirmed(data) {
+      return data.get('amountConfirmed', false) == true
+        || data.get('amountManuallyConfirmed', false) == true
+        || data.get('amountConfirmedByManagerWaiver', false) == true;
+    }
+
+    function hasVoucher(data) {
+      return data.get('voucherUrl', '') != ''
+        || data.get('folderUrl', '') != '';
+    }
+
+    function voucherWaived(data) {
+      return data.get('voucherNotRequired', false) == true
+        || data.get('voucherRequirementWaived', false) == true;
+    }
+
     function submissionComplete(data) {
       return data.get('estimated', false) == true
         || (
-          data.get('archived', false) == true
+          amountConfirmed(data)
           && (
-            data.get('amountConfirmed', false) == true
-            || data.get('amountManuallyConfirmed', false) == true
-          )
-          && (
-            data.get('voucherUrl', '') != ''
-            || data.get('folderUrl', '') != ''
+            (data.get('archived', false) == true && hasVoucher(data))
+            || voucherWaived(data)
           )
         );
     }
@@ -68,7 +80,14 @@ service cloud.firestore {
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) == false
         && request.resource.data.get('locked', false) == false
-        && submissionComplete(request.resource.data);
+        && (
+          (manager() && submissionComplete(request.resource.data))
+          || (
+            !manager()
+            && !voucherWaived(request.resource.data)
+            && submissionComplete(request.resource.data)
+          )
+        );
 
       allow update: if enabledUser() && (
         manager()
@@ -80,6 +99,9 @@ service cloud.firestore {
           && request.resource.data.get('reviewStatus', 'pending') != 'approved'
           && request.resource.data.get('reviewed', false) == false
           && request.resource.data.get('locked', false) == false
+          && request.resource.data.get('voucherNotRequired', false) == resource.data.get('voucherNotRequired', false)
+          && request.resource.data.get('voucherRequirementWaived', false) == resource.data.get('voucherRequirementWaived', false)
+          && request.resource.data.get('amountConfirmedByManagerWaiver', false) == resource.data.get('amountConfirmedByManagerWaiver', false)
           && submissionComplete(request.resource.data)
         )
       );
