@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>資源教室經費管理系統</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=1.1.0" />
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
   <div id="loginView" class="center-page">
@@ -39,6 +40,8 @@
       <button id="deletePlanBtn" class="ghost-btn manager-only" style="color:#b42318;border-color:#efb2b2">刪除計畫</button>
     </div>
 
+    <div id="inactivePlanNotice" class="inactive-plan hidden">此計畫已停用：不可新增使用紀錄或新增經費項目；既有資料仍可查看與依權限修改。</div>
+
     <nav class="tabs">
       <button class="tab active" data-view="dashboard">總覽</button>
       <button class="tab" data-view="records">使用紀錄</button>
@@ -57,20 +60,21 @@
 
       <section id="records" class="view">
         <div class="section-head responsive-head">
-          <div><h2>使用紀錄</h2><p id="recordsHint">登錄自己已使用並完成學校核銷的經費。</p></div>
+          <div><h2>使用紀錄</h2><p id="recordsHint">登錄經費使用紀錄。</p></div>
           <button id="newRecordBtn" class="primary-btn">＋ 新增使用紀錄</button>
         </div>
         <div class="panel filters">
           <select id="filterCategory"><option value="">全部經費項目</option></select>
+          <select id="filterSemester"><option value="">全部學期</option></select>
           <select id="filterArchive"><option value="">全部歸檔狀態</option><option value="done">憑證已歸檔</option><option value="pending">憑證未歸檔</option></select>
-          <input id="searchInput" placeholder="搜尋用途、老師或核銷單號" />
+          <input id="searchInput" placeholder="搜尋用途、老師或學期" />
         </div>
         <div id="recordList" class="record-list"></div>
       </section>
 
       <section id="budget" class="view manager-only">
         <div class="section-head responsive-head">
-          <div><h2>經費編列</h2><p>先設定計畫總額，再將額度分配至人事費、教耗材、雜支、資本門等項目。</p></div>
+          <div><h2>經費編列</h2><p>先設定計畫總額，再將額度分配至各經費項目。</p></div>
           <button id="newCategoryBtn" class="primary-btn">＋ 新增經費項目</button>
         </div>
         <div id="allocationSummary" class="panel" style="margin-bottom:16px"></div>
@@ -89,7 +93,7 @@
         <label>期別<select id="planTerm"><option value="年度">年度</option><option value="上學期">上學期</option><option value="下學期">下學期</option></select></label>
       </div>
       <label>計畫總核定額度<input id="planTotalBudget" required type="number" min="0" step="1" placeholder="例如：7000000" /></label>
-      <p class="hint">此處填整個計畫的總額；人事費、教耗材、雜支、資本門等額度會從此總額中分配。</p>
+      <p class="hint">此處填整個計畫的總額；各經費項目額度會從此總額中分配。</p>
       <label class="check-row"><input id="planActive" type="checkbox" checked /><span>啟用此計畫</span></label>
       <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="planDialog">取消</button><button class="primary-btn" value="default">儲存</button></div>
     </form>
@@ -100,13 +104,29 @@
       <div class="dialog-head"><h3 id="recordDialogTitle">新增使用紀錄</h3><button type="button" class="icon-btn" data-close="recordDialog">×</button></div>
       <input type="hidden" id="recordId" />
       <label>經費項目<select id="recordCategory" required></select></label>
-      <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：新生座談活動耗材" /></label>
-      <div class="two-cols"><label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label><label>核銷日期<input id="recordDate" required type="date" /></label></div>
-      <label>學校請購／核銷單號（可空白）<input id="recordVoucherNo" maxlength="80" /></label>
-      <label>共用資料夾連結（可空白）<input id="recordFolderUrl" type="url" placeholder="https://..." /></label>
+      <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：A4影印紙" /></label>
+      <div class="two-cols">
+        <label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label>
+        <label>學期<input id="recordSemester" required maxlength="5" pattern="\d{3}-[12]" placeholder="例如：114-2、115-1" /></label>
+      </div>
+      <label class="check-row estimate-row"><input id="recordEstimated" type="checkbox" /><span><strong>此筆為預估金額</strong><small>預估金額會先扣除「計畫剩餘額度」，但不會扣除「已核銷餘額」。</small></span></label>
+
+      <div class="voucher-upload">
+        <label>核銷單據（可空白）
+          <input id="recordVoucherFile" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" />
+        </label>
+        <p class="hint">支援 PDF／圖片，單檔最多 15 MB。選擇後會自動以 AI OCR 比對「粘貼憑證用紙」的合計金額。</p>
+        <div id="existingVoucherBox" class="existing-voucher hidden"></div>
+        <div id="aiAmountCheck" class="ai-check hidden"></div>
+        <label id="amountConfirmWrap" class="check-row confirm-row hidden">
+          <input id="recordAmountConfirm" type="checkbox" />
+          <span><strong>我已人工確認輸入金額正確</strong><small>當 AI 辨識金額不同或無法可靠判讀時，必須勾選後才能儲存。</small></span>
+        </label>
+      </div>
+
       <label class="check-row"><input id="recordArchived" type="checkbox" /><span>我已將核銷憑證／資料放入共用資料夾</span></label>
       <label>備註<textarea id="recordNote" rows="3" maxlength="500"></textarea></label>
-      <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="recordDialog">取消</button><button class="primary-btn" value="default">儲存</button></div>
+      <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="recordDialog">取消</button><button id="recordSaveBtn" class="primary-btn" value="default">儲存</button></div>
     </form>
   </dialog>
 
@@ -124,6 +144,6 @@
   </dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=1.1.0"></script>
 </body>
 </html>
