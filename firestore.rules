@@ -29,6 +29,21 @@ service cloud.firestore {
         || resource.data.get('locked', false) == true;
     }
 
+    function submissionComplete(data) {
+      return data.get('estimated', false) == true
+        || (
+          data.get('archived', false) == true
+          && (
+            data.get('amountConfirmed', false) == true
+            || data.get('amountManuallyConfirmed', false) == true
+          )
+          && (
+            data.get('voucherUrl', '') != ''
+            || data.get('folderUrl', '') != ''
+          )
+        );
+    }
+
     match /users/{userEmail} {
       allow read: if enabledUser() && (manager() || userEmail == email());
       allow create, update, delete: if manager();
@@ -52,7 +67,8 @@ service cloud.firestore {
         && request.resource.data.createdBy == email()
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false;
+        && request.resource.data.get('locked', false) == false
+        && submissionComplete(request.resource.data);
 
       allow update: if enabledUser() && (
         manager()
@@ -64,6 +80,7 @@ service cloud.firestore {
           && request.resource.data.get('reviewStatus', 'pending') != 'approved'
           && request.resource.data.get('reviewed', false) == false
           && request.resource.data.get('locked', false) == false
+          && submissionComplete(request.resource.data)
         )
       );
 
