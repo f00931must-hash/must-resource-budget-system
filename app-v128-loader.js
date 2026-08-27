@@ -18,7 +18,6 @@ async function loadBudgetApp(){
     'if(file&&file.size>15*1024*1024)return toast("核銷單據檔案不可超過 15 MB",5000);'
   );
 
-  // Hide soft-deleted data from all normal views.
   source = source.replace(
     'state.plans=snap.docs.map(d=>({id:d.id,...d.data()}));',
     'state.plans=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);'
@@ -32,7 +31,6 @@ async function loadBudgetApp(){
     'state.records=recSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);'
   );
 
-  // Plan deletion -> recycle bin. Existing safety rule (no usage records) remains.
   source = source.replace(
     /async function deleteCurrentPlan\(\)\{[\s\S]*?\n\}\n\nfunction openNewRecord/,
 `async function deleteCurrentPlan(){
@@ -53,7 +51,6 @@ async function loadBudgetApp(){
 
 function openNewRecord`);
 
-  // Usage record deletion -> recycle bin. Attachment is deliberately preserved.
   source = source.replace(
     /async function deleteRecord\(id\)\{[\s\S]*?\n\}\n\nasync function approveRecord/,
 `async function deleteRecord(id){
@@ -71,7 +68,6 @@ function openNewRecord`);
 
 async function approveRecord`);
 
-  // Category deletion -> recycle bin. Existing safety rule (no usage records) remains.
   source = source.replace(
     /async function deleteCategory\(id\)\{[\s\S]*?\n\}\n\nfunction switchView/,
 `async function deleteCategory(id){
@@ -89,20 +85,17 @@ async function approveRecord`);
 
 function switchView`);
 
-  if(source.includes('form.append("system","shared")')){
-    throw new Error("經費附件仍指向公開附件庫，已停止載入以保護資料。");
-  }
-  if(!source.includes('form.append("system","budget")')){
-    throw new Error("經費私密附件路由未正確套用。");
-  }
-  if(!source.includes('soft-delete-record') || !source.includes('soft-delete-plan') || !source.includes('soft-delete-category')){
-    throw new Error("回收桶刪除保護未正確套用，已停止載入以避免永久誤刪。");
-  }
+  if(source.includes('form.append("system","shared")')) throw new Error("經費附件仍指向公開附件庫，已停止載入以保護資料。");
+  if(!source.includes('form.append("system","budget")')) throw new Error("經費私密附件路由未正確套用。");
+  if(!source.includes('soft-delete-record') || !source.includes('soft-delete-plan') || !source.includes('soft-delete-category')) throw new Error("回收桶刪除保護未正確套用，已停止載入以避免永久誤刪。");
 
   const blob = new Blob([source], {type:"text/javascript"});
   const url = URL.createObjectURL(blob);
   try{ await import(url); }
   finally{ URL.revokeObjectURL(url); }
+
+  // Capture plan restore before the generic recycle-bin restore handler so its categories return together.
+  await import("./budget-trash-plan-restore-v128.js?v=1.2.8");
 }
 
 loadBudgetApp().catch(err=>{
