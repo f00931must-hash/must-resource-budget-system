@@ -8,6 +8,7 @@ import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 import "./budget-manager-usability-v136.js?v=1.3.8";
+import "./budget-manager-waiver-fix-v138.js?v=1.3.8";
 
 const PROJECT_ID="must-resource-budget-system";
 const VALID_VIEWS=new Set(["dashboard","records","budget","trash"]);
@@ -73,8 +74,7 @@ function restoreCategoryFilter(){
   if(!wanted) return;
   const exists=[...select.options].some(o=>o.value===wanted);
   if(exists){
-    const changed=select.value!==wanted;
-    if(changed) select.value=wanted;
+    if(select.value!==wanted) select.value=wanted;
     // Always notify the main app after options are rebuilt; otherwise the dropdown
     // can show the saved value while recordList still contains the previous scope.
     dispatchFilterChange(select);
