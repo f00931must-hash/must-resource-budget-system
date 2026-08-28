@@ -45,8 +45,13 @@ service cloud.firestore {
         || data.get('voucherRequirementWaived', false) == true;
     }
 
+    function voucherWaiverRequested(data) {
+      return data.get('voucherNotRequiredRequested', false) == true;
+    }
+
     function submissionComplete(data) {
       return data.get('estimated', false) == true
+        || voucherWaiverRequested(data)
         || (
           amountConfirmed(data)
           && (
