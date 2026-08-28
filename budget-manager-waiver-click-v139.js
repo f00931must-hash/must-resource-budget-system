@@ -1,6 +1,6 @@
-// Budget manager waiver click handler v1.3.9
+// Budget manager waiver click handler v1.3.10
 // The waiver button is rendered directly by the main record renderer.
-// This handler verifies manager role at click time, then applies the waiver with audit logging.
+// Only amountConfirmedByManagerWaiver means a manager actually confirmed the waiver.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -30,7 +30,7 @@ async function waive(id){
   const r=recordSnap.data();
   if(r.reviewStatus==="approved" || r.reviewed===true || r.locked===true) return alert("此筆已核銷並鎖定。");
   if(r.voucherUrl||r.folderUrl) return alert("此筆已有核銷單據，不需要設定免附單據。");
-  if(r.voucherNotRequired===true || r.voucherRequirementWaived===true) return alert("此筆已經由管理員確認為免附單據。");
+  if(r.amountConfirmedByManagerWaiver===true) return alert("此筆已經由管理員確認為免附單據。");
 
   const requested=r.voucherNotRequiredRequested===true;
   const msg=`確定將「${r.purpose||"此筆"}」設定為免附核銷單據？\n\n金額：${money(r.amount)}\n${requested?"老師已於送出時申報此單無需附上單據。":"老師尚未申報免附單據，請確認確實不需要附件。"}\n\n確認後才能進行「核對完成」。`;
