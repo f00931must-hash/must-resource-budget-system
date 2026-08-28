@@ -1,5 +1,6 @@
-// Advance allocation: teacher-facing estimated -> actual reimbursement helper v1.5.0
-// Only patches records created from advance allocations and owned by the signed-in user.
+// Advance allocation: teacher-facing estimated -> actual reimbursement helper v1.5.6
+// Patches linked estimated records with a "轉實際核銷" action.
+// Performance: DOM mutations only repatch cached data; Firestore is refreshed only on meaningful events.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -15,7 +16,7 @@ function recordId(card){
   const el=card.querySelector("[data-edit-record],[data-delete-record],[data-approve-record],[data-unlock-record]");
   return el?.dataset.editRecord||el?.dataset.deleteRecord||el?.dataset.approveRecord||el?.dataset.unlockRecord||"";
 }
-function linked(r){return r?.source==="advance-allocation"||!!r?.advanceAllocationId;}
+function linked(r){return r?.source==="advance-allocation"||!!r?.advanceAllocationId||r?.advanceLinked===true;}
 function approved(r){return r?.reviewStatus==="approved"||r?.reviewed===true||r?.locked===true;}
 
 function patchCards(){
@@ -41,7 +42,7 @@ function addDialogHint(r){
   hint.dataset.advanceConvertHint="1";
   hint.className="panel";
   hint.style.cssText="margin:0 0 12px;padding:12px;background:#f7f4ff;border:1px solid #ddd3ff";
-  hint.innerHTML=`<strong>此筆由預支／動支分配建立</strong><div style="margin-top:4px">原預估：${money(r.originalEstimatedAmount??r.amount)}</div><small>請將金額改為實際支出，並完成核銷單據上傳與金額確認。原預估金額會保留供差額計算。</small>`;
+  hint.innerHTML=`<strong>此筆已連結預支／動支</strong><div style="margin-top:4px">原預估：${money(r.originalEstimatedAmount??r.amount)}</div><small>請將金額改為實際支出，並完成核銷單據上傳與金額確認。原預估金額會保留供差額計算。</small>`;
   const title=form.querySelector(".dialog-head");
   title?.insertAdjacentElement("afterend",hint);
 }
@@ -76,14 +77,14 @@ function cleanupDialog(){
 
 async function refresh(){
   if(!db||!email)return;
-  const p=planId(); if(!p){rows=[];return;}
+  const p=planId(); if(!p){rows=[];patchCards();return;}
   try{
     const snap=await getDocs(query(collection(db,"expenseRecords"),where("planId","==",p)));
     rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.deleted!==true);
     patchCards();
   }catch(e){console.warn("advance actual helper refresh failed",e);}
 }
-function schedule(ms=100){clearTimeout(timer);timer=setTimeout(refresh,ms);}
+function schedule(ms=120){clearTimeout(timer);timer=setTimeout(refresh,ms);}
 
 document.addEventListener("click",e=>{
   const b=e.target.closest?.("[data-convert-advance-record]");
@@ -92,9 +93,18 @@ document.addEventListener("click",e=>{
   beginConvert(b.dataset.convertAdvanceRecord||"");
 },true);
 
-document.getElementById("recordDialog")?.addEventListener("close",cleanupDialog);
-document.getElementById("planSelect")?.addEventListener("change",()=>schedule(150));
-new MutationObserver(()=>schedule(80)).observe(document.getElementById("recordList")||document.body,{childList:true,subtree:true});
+const recordDialog=document.getElementById("recordDialog");
+recordDialog?.addEventListener("close",()=>{cleanupDialog();schedule(160);});
+document.getElementById("planSelect")?.addEventListener("change",()=>schedule(180));
+
+// Important: rendering record cards should not trigger another Firestore query.
+// Reuse cached rows and only re-apply the action buttons.
+const recordList=document.getElementById("recordList");
+if(recordList){
+  new MutationObserver(()=>patchCards()).observe(recordList,{childList:true,subtree:true});
+}
+
+window.addEventListener("budget-advance-refresh",()=>schedule(160));
 
 async function init(){
   for(let i=0;i<120;i++){
@@ -104,7 +114,7 @@ async function init(){
   if(!auth||!db)return;
   onAuthStateChanged(auth,user=>{
     email=String(user?.email||"").toLowerCase();
-    if(email) schedule(150);
+    if(email) schedule(180);
   });
 }
 init();
