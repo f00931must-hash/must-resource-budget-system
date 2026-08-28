@@ -1,6 +1,5 @@
-// Budget private attachment open fix v1.3.2
-// Force correct MIME when opening authenticated private attachments.
-// This prevents Chrome from rendering raw %PDF bytes as text.
+// Budget private attachment open fix v1.3.5
+// Force correct MIME and always route budget private attachments through Worker.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -26,15 +25,24 @@ function pathFromInput(input){
   return "";
 }
 
+function isBudgetPrivateLink(a){
+  if(!a) return false;
+  const raw=a.dataset?.privateHref || a.getAttribute?.("href") || "";
+  if(!raw) return false;
+  if(raw.startsWith("/download?system=budget")) return true;
+  if(raw.startsWith(WORKER_URL+"/download?system=budget")) return true;
+  if(raw.startsWith("uploads/budget/")) return true;
+  if(raw.includes("must-resource-private-assets") && raw.includes("uploads/budget/")) return true;
+  try{
+    const u=new URL(raw,location.href);
+    return u.pathname==="/download" && u.searchParams.get("system")==="budget";
+  }catch{}
+  return false;
+}
+
 function mimeFromPath(path){
   const ext=String(path||"").toLowerCase().split(".").pop();
-  return {
-    pdf:"application/pdf",
-    jpg:"image/jpeg",
-    jpeg:"image/jpeg",
-    png:"image/png",
-    webp:"image/webp"
-  }[ext] || "application/octet-stream";
+  return { pdf:"application/pdf", jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", webp:"image/webp" }[ext] || "application/octet-stream";
 }
 
 async function openCorrectly(raw){
@@ -72,16 +80,16 @@ async function openCorrectly(raw){
   }
 }
 
-// Existing adapter binds private links in bubble phase.
-// Capture first and replace only those already marked as private links.
+// Capture ANY private budget attachment link before browser navigation.
+// Do not depend on another module having already marked the anchor.
 document.addEventListener("click",async e=>{
-  const a=e.target.closest?.('a[data-private-bound="1"]');
-  if(!a) return;
-  const raw=a.dataset.privateHref||"";
-  if(!raw) return;
+  const a=e.target.closest?.("a");
+  if(!isBudgetPrivateLink(a)) return;
 
+  const raw=a.dataset?.privateHref || a.getAttribute("href") || "";
   e.preventDefault();
   e.stopImmediatePropagation();
+
   const old=a.textContent;
   try{
     a.textContent="附件開啟中…";
