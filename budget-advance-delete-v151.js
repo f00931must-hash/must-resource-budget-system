@@ -1,9 +1,10 @@
-// Budget advance manager-only delete controls v1.5.2
+// Budget advance manager-only delete controls v1.5.3
 // Safe deletion rules:
 // 1) Advance batch can be deleted only when it has no active allocations.
 // 2) Allocation can be deleted only while its linked expense record is still estimated and unlocked.
 // 3) Only manager users can see/use these controls; Firestore rules also enforce manager-only access.
-// 4) Dynamic batch selector is created after module load, so selection state is observed through delegated events + mutations.
+// 4) Existing estimated usage records are preserved when an advance allocation is removed.
+// 5) Only legacy records originally created by the advance module are deleted together with the allocation.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -43,8 +44,6 @@ function ensureBatchDeleteButton(){
     edit.insertAdjacentElement("afterend",btn);
     btn.addEventListener("click",deleteBatch);
   }
-  // Important: the selector is populated dynamically after this module loads.
-  // Recalculate disabled state every patch instead of relying on an early event binding.
   const id=String(select.value||"").trim();
   btn.disabled=!id;
   btn.setAttribute("aria-disabled",id?"false":"true");
@@ -111,16 +110,33 @@ async function deleteAllocation(id){
       alert("此活動已轉為實際核銷或已鎖定，不能從預支／動支頁直接刪除。");
       return;
     }
-    if(!confirm(`確定刪除「${a.purpose||"此活動"}」的預估分配嗎？\n\n負責老師：${a.ownerName||a.ownerEmail||"—"}\n預估金額：${Number(a.estimatedAmount||0).toLocaleString("zh-TW")} 元\n\n對應的預估使用紀錄也會一併移除。`))return;
+
+    const legacyCreatedByAdvance = r.source==="advance-allocation" && a.recordOrigin!=="existing-estimate";
+    const consequence = legacyCreatedByAdvance
+      ? "對應的舊版測試預估使用紀錄也會一併移除。"
+      : "只會解除預支分配；原本的預估使用紀錄會保留。";
+    if(!confirm(`確定刪除「${a.purpose||"此活動"}」的預支分配嗎？\n\n負責老師：${a.ownerName||a.ownerEmail||"—"}\n預估金額：${Number(a.estimatedAmount||0).toLocaleString("zh-TW")} 元\n\n${consequence}`))return;
+
     const wb=writeBatch(db);
     wb.update(doc(db,"advanceAllocations",id),{
       deleted:true,deletedAt:serverTimestamp(),deletedBy:email,updatedAt:serverTimestamp(),updatedBy:email
     });
-    wb.update(doc(db,"expenseRecords",a.expenseRecordId),{
-      deleted:true,deletedAt:serverTimestamp(),deletedBy:email,updatedAt:serverTimestamp(),updatedBy:email
-    });
+
+    if(legacyCreatedByAdvance){
+      wb.update(doc(db,"expenseRecords",a.expenseRecordId),{
+        deleted:true,deletedAt:serverTimestamp(),deletedBy:email,updatedAt:serverTimestamp(),updatedBy:email
+      });
+    }else{
+      wb.update(doc(db,"expenseRecords",a.expenseRecordId),{
+        advanceBatchId:"",advanceAllocationId:"",advanceLinked:false,
+        updatedAt:serverTimestamp(),updatedBy:email
+      });
+    }
+
     wb.set(doc(collection(db,"auditLogs")),{
-      type:"advance-allocation",targetId:id,expenseRecordId:a.expenseRecordId,planId:a.planId||currentPlanId(),action:"delete-estimated-allocation",actorEmail:email,createdAt:serverTimestamp()
+      type:"advance-allocation",targetId:id,expenseRecordId:a.expenseRecordId,planId:a.planId||currentPlanId(),
+      action:legacyCreatedByAdvance?"delete-estimated-allocation":"unlink-existing-estimate",
+      actorEmail:email,createdAt:serverTimestamp()
     });
     await wb.commit();
     location.reload();
@@ -134,7 +150,6 @@ window.addEventListener("click",e=>{
   deleteAllocation(btn.dataset.deleteAdvanceAllocation||"");
 },true);
 
-// Delegated because #advanceBatchSelect does not exist yet when this module first loads.
 document.addEventListener("input",e=>{
   if(e.target?.id==="advanceBatchSelect")schedule(0);
 },true);
