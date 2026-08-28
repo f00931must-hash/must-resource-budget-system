@@ -1,8 +1,8 @@
-// Budget app loader v1.3.9
+// Budget app loader v1.3.10
 // Keeps stable app-v120 behavior, routes vouchers private, converts data deletion to 10-day soft delete,
 // and renders the manager no-voucher action directly with each record card.
 
-const SOURCE_URL = "./app-v120.js?v=1.3.9-base";
+const SOURCE_URL = "./app-v120.js?v=1.3.10-base";
 
 async function loadBudgetApp(){
   const res = await fetch(SOURCE_URL, {cache:"no-store"});
@@ -32,12 +32,13 @@ async function loadBudgetApp(){
     'state.records=recSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);'
   );
 
+  const oldIssues = `const issues=(r.estimated!==true && !evidenceUrl?'<span class="status danger-badge">缺單據</span>':'')+\n      (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true?'<span class="status danger-badge">未確認金額</span>':'');`;
+  const newIssues = `const managerWaiverDone=r.amountConfirmedByManagerWaiver===true;\n    const issues=(r.estimated!==true && !evidenceUrl && !managerWaiverDone?'<span class="status danger-badge">缺單據</span>':'')+\n      (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true && !managerWaiverDone?'<span class="status danger-badge">未確認金額</span>':'');`;
+  if(!source.includes(oldIssues)) throw new Error("找不到使用紀錄狀態產生位置，已停止載入以避免免附單據狀態錯誤。");
+  source = source.replace(oldIssues,newIssues);
+
   const oldApproveAction = 'if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;';
-  const newApproveAction = `if(isManager() && !r.estimated && !approved){
-      const waiverApproved=r.voucherNotRequired===true || r.voucherRequirementWaived===true;
-      if(!evidenceUrl && !waiverApproved) actions+=\`<button class="link-btn" data-manager-waive-voucher="\${r.id}">免附單據</button>\`;
-      actions+=\`<button class="link-btn approve" data-approve-record="\${r.id}">核對完成</button>\`;
-    }`;
+  const newApproveAction = `if(isManager() && !r.estimated && !approved){\n      const managerWaiverDone=r.amountConfirmedByManagerWaiver===true;\n      if(!evidenceUrl && !managerWaiverDone) actions+=\`<button class="link-btn" data-manager-waive-voucher="\${r.id}">免附單據</button>\`;\n      actions+=\`<button class="link-btn approve" data-approve-record="\${r.id}">核對完成</button>\`;\n    }`;
   if(!source.includes(oldApproveAction)) throw new Error("找不到管理員核對按鈕產生位置，已停止載入以避免免附單據流程失效。");
   source = source.replace(oldApproveAction, newApproveAction);
 
@@ -98,6 +99,7 @@ function switchView`);
   if(source.includes('form.append("system","shared")')) throw new Error("經費附件仍指向公開附件庫，已停止載入以保護資料。");
   if(!source.includes('form.append("system","budget")')) throw new Error("經費私密附件路由未正確套用。");
   if(!source.includes('data-manager-waive-voucher')) throw new Error("免附單據管理員按鈕未正確寫入主畫面，已停止載入。");
+  if(!source.includes('amountConfirmedByManagerWaiver')) throw new Error("管理員免附單據確認標記未正確套用。");
   if(!source.includes('soft-delete-record') || !source.includes('soft-delete-plan') || !source.includes('soft-delete-category')) throw new Error("回收桶刪除保護未正確套用，已停止載入以避免永久誤刪。");
 
   const blob = new Blob([source], {type:"text/javascript"});
@@ -105,7 +107,7 @@ function switchView`);
   try{ await import(url); }
   finally{ URL.revokeObjectURL(url); }
 
-  await import("./budget-trash-plan-restore-v128.js?v=1.3.9");
+  await import("./budget-trash-plan-restore-v128.js?v=1.3.10");
 }
 
 loadBudgetApp().catch(err=>{
