@@ -1,6 +1,7 @@
-// Budget issue filter compatibility v1.4.4
+// Budget issue filter compatibility v1.4.5
 // Keep issue-filter results consistent with manager todo counts.
 // Resolved records (manager-waived / approved / locked) are not outstanding issues.
+// Quick todo cards clear conflicting review/issue filters before the main app handles the click.
 
 function activeIssue(){
   return document.getElementById("filterIssue")?.value||"";
@@ -27,6 +28,30 @@ function applyIssueFilterCompatibility(){
 }
 
 function schedule(){ setTimeout(applyIssueFilterCompatibility,0); }
+
+// Capture before the main app's onclick runs so old quick-card filters don't stack.
+window.addEventListener("click",e=>{
+  const reviewCard=e.target.closest?.("[data-quick-review]");
+  if(reviewCard){
+    const issue=document.getElementById("filterIssue");
+    if(issue && issue.value!==""){
+      issue.value="";
+      issue.dispatchEvent(new Event("input",{bubbles:true}));
+      issue.dispatchEvent(new Event("change",{bubbles:true}));
+    }
+    return;
+  }
+
+  const issueCard=e.target.closest?.("[data-quick-issue]");
+  if(issueCard){
+    const review=document.getElementById("filterReview");
+    if(review && review.value!==""){
+      review.value="";
+      review.dispatchEvent(new Event("input",{bubbles:true}));
+      review.dispatchEvent(new Event("change",{bubbles:true}));
+    }
+  }
+},true);
 
 document.getElementById("filterIssue")?.addEventListener("input",schedule);
 document.getElementById("filterIssue")?.addEventListener("change",schedule);
