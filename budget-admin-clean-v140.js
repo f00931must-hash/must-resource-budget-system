@@ -1,4 +1,4 @@
-// Budget admin unified controller v1.4.1
+// Budget admin unified controller v1.4.2
 // Single source of truth for manager no-voucher confirm / revoke / final review.
 // Teacher request (voucherNotRequiredRequested) NEVER equals manager confirmation.
 
@@ -14,7 +14,7 @@ let ready=false;
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
 function money(n){ return new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0}).format(Number(n||0)); }
 function isApproved(r){ return r?.reviewStatus==="approved" || r?.reviewed===true || r?.locked===true; }
-function managerConfirmed(r){ return r?.voucherWaiverManagerConfirmed===true; }
+function managerConfirmed(r){ return r?.voucherWaiverManagerConfirmed===true || r?.amountConfirmedByManagerWaiver===true; }
 function hasVoucher(r){ return !!(r?.voucherUrl||r?.folderUrl); }
 function recordId(card){
   const el=card.querySelector("[data-edit-record],[data-delete-record],[data-approve-record],[data-unlock-record],[data-manager-waive-voucher],[data-manager-revoke-waiver]");
@@ -55,7 +55,6 @@ function patchCards(){
     const confirmed=managerConfirmed(r);
     const voucher=hasVoucher(r);
 
-    // Remove every legacy/doubled waiver control first.
     actions.querySelectorAll("[data-manager-waive-voucher],[data-waive-voucher],[data-require-voucher],[data-require-voucher-clean],[data-manager-revoke-waiver]").forEach(x=>x.remove());
 
     if(!voucher && !confirmed){
@@ -139,7 +138,6 @@ async function confirmWaiver(id){
       voucherWaiverManagerConfirmed:true,
       voucherWaiverManagerConfirmedBy:email,
       voucherWaiverManagerConfirmedAt:serverTimestamp(),
-      // Keep legacy fields synchronized only for old reports/rules; they are NOT used as manager-state truth anymore.
       voucherNotRequired:true,
       voucherRequirementWaived:true,
       amountConfirmed:true,
@@ -196,7 +194,6 @@ async function approveWaived(id){
   }catch(err){ alert("核對失敗："+(err?.message||err)); return true; }
 }
 
-// SINGLE manager click controller. Loaded before teacher-side module; stopImmediatePropagation prevents duplicates.
 document.addEventListener("click",async e=>{
   const waive=e.target.closest?.("[data-manager-waive-voucher]");
   if(waive){
