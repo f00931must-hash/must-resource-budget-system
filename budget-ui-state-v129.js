@@ -12,7 +12,6 @@ const VALID_VIEWS=new Set(["dashboard","records","budget","trash"]);
 let db=null;
 let auth=null;
 let countTimer=null;
-let lastPlanId="";
 let lastCountSignature="";
 
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
@@ -72,6 +71,9 @@ window.addEventListener("load",()=>setTimeout(restoreView,350));
 function cleanOptionLabel(text){
   return String(text||"").replace(/（\d+）\s*$/u,"").trim();
 }
+function setOptionText(option,text){
+  if((option.textContent||"")!==text) option.textContent=text;
+}
 
 async function syncCategoryCounts(){
   if(!db || !auth?.currentUser) return;
@@ -84,21 +86,15 @@ async function syncCategoryCounts(){
     const rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.deleted!==true);
     const counts=new Map();
     for(const r of rows) counts.set(r.categoryId,(counts.get(r.categoryId)||0)+1);
-    const sig=JSON.stringify([planId,rows.length,[...counts.entries()].sort()]);
-    if(sig===lastCountSignature){
-      // Options may have been rebuilt by the main app even though counts did not change.
-      // Continue to repaint labels below.
-    }
-    lastCountSignature=sig;
-    lastPlanId=planId;
+    lastCountSignature=JSON.stringify([planId,rows.length,[...counts.entries()].sort()]);
 
     [...select.options].forEach((o,i)=>{
       if(i===0 || !o.value){
-        o.textContent=`全部經費項目（${rows.length}）`;
+        setOptionText(o,`全部經費項目（${rows.length}）`);
         return;
       }
       const base=cleanOptionLabel(o.textContent||o.value);
-      o.textContent=`${base}（${counts.get(o.value)||0}）`;
+      setOptionText(o,`${base}（${counts.get(o.value)||0}）`);
     });
   }catch(err){
     console.warn("category count sync failed",err);
