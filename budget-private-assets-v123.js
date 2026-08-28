@@ -1,45 +1,71 @@
-// Budget private attachments adapter v1.2.3
-// Keeps legacy public attachments readable while routing NEW budget vouchers to the private repo through Worker.
+// Budget private attachments adapter v1.2.9
+// Private voucher access through Worker with Firebase authentication.
+// Keeps legacy public attachments untouched.
 
-import { getApps, getApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 
+const PROJECT_ID = "must-resource-budget-system";
 const WORKER_URL = "https://must-free-upload-service.f00931-must.workers.dev";
 const PRIVATE_DOWNLOAD_PREFIX = "/download?system=budget";
 const MAX_BUDGET_FILE_BYTES = 15 * 1024 * 1024;
 const nativeFetch = window.fetch.bind(window);
 
+function budgetApp(){
+  return getApps().find(a=>a.options?.projectId===PROJECT_ID) || null;
+}
+
 function currentUser(){
   try{
-    if(!getApps().length) return null;
-    return getAuth(getApp()).currentUser;
+    const app=budgetApp();
+    return app ? getAuth(app).currentUser : null;
   }catch{
     return null;
   }
 }
 
-async function authHeaders(headersInit){
+async function authHeaders(headersInit, forceRefresh=false){
   const user=currentUser();
   if(!user) throw new Error("尚未登入，請重新登入後再試。");
-  const token=await user.getIdToken(true);
+  const token=await user.getIdToken(forceRefresh);
   const headers=new Headers(headersInit||{});
   headers.set("Authorization","Bearer "+token);
   return headers;
 }
 
-function isWorkerRequest(url){
-  return typeof url==="string" && url.startsWith(WORKER_URL);
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function isWorkerRequest(url){ return typeof url==="string" && url.startsWith(WORKER_URL); }
+
+function privatePathFromUrl(input){
+  const raw=String(input||"").trim();
+  if(!raw) return "";
+  if(raw.startsWith("uploads/budget/")) return raw.replace(/^\/+/,"");
+  try{
+    const u=new URL(raw, location.href);
+    const qp=u.searchParams.get("path");
+    if(qp && String(qp).replace(/^\/+/,"").startsWith("uploads/budget/")) return decodeURIComponent(qp).replace(/^\/+/,"");
+    const decoded=decodeURIComponent(u.pathname);
+    const idx=decoded.indexOf("uploads/budget/");
+    if(idx>=0) return decoded.slice(idx).replace(/^\/+/,"");
+  }catch{}
+  return "";
 }
 
 function isPrivateDownloadUrl(url){
-  if(typeof url!=="string") return false;
-  return url.startsWith(PRIVATE_DOWNLOAD_PREFIX) || url.startsWith(WORKER_URL+PRIVATE_DOWNLOAD_PREFIX);
+  const raw=String(url||"");
+  if(raw.startsWith(PRIVATE_DOWNLOAD_PREFIX) || raw.startsWith(WORKER_URL+PRIVATE_DOWNLOAD_PREFIX)) return true;
+  if(raw.startsWith("uploads/budget/")) return true;
+  if(raw.includes("must-resource-private-assets") && raw.includes("uploads/budget/")) return true;
+  return false;
 }
 
-function toWorkerUrl(url){
-  if(url.startsWith(WORKER_URL)) return url;
-  if(url.startsWith("/")) return WORKER_URL+url;
-  return url;
+function toWorkerUrl(input){
+  const raw=String(input||"");
+  if(raw.startsWith(WORKER_URL+PRIVATE_DOWNLOAD_PREFIX)) return raw;
+  if(raw.startsWith(PRIVATE_DOWNLOAD_PREFIX)) return WORKER_URL+raw;
+  const path=privatePathFromUrl(raw);
+  if(path) return WORKER_URL+PRIVATE_DOWNLOAD_PREFIX+"&path="+encodeURIComponent(path);
+  return raw;
 }
 
 // Intercept only budget voucher traffic. Existing activity / announcement traffic is untouched.
@@ -47,7 +73,6 @@ window.fetch = async function(input, init={}){
   let url = typeof input === "string" ? input : input?.url || "";
   let options = {...init};
 
-  // app-v120 currently posts system=shared. Rewrite ONLY the budget voucher folder to system=budget.
   if(isWorkerRequest(url) && url.endsWith("/upload") && options.body instanceof FormData){
     const subfolder=String(options.body.get("subfolder")||"");
     if(subfolder==="budget/reimbursement-vouchers"){
@@ -59,10 +84,9 @@ window.fetch = async function(input, init={}){
     }
   }
 
-  // Private attachment URLs are intentionally relative. Route them back through Worker and attach Firebase ID token.
   if(isPrivateDownloadUrl(url)){
     url=toWorkerUrl(url);
-    options.headers=await authHeaders(options.headers);
+    options.headers=await authHeaders(options.headers,false);
     return nativeFetch(url,options);
   }
 
@@ -70,39 +94,63 @@ window.fetch = async function(input, init={}){
 };
 
 async function fetchPrivateBlob(pathOrUrl){
-  let url=String(pathOrUrl||"");
-  if(url.startsWith("uploads/budget/")){
-    url=PRIVATE_DOWNLOAD_PREFIX+"&path="+encodeURIComponent(url);
+  const url=toWorkerUrl(pathOrUrl);
+  if(!url.startsWith(WORKER_URL+PRIVATE_DOWNLOAD_PREFIX)) throw new Error("不是私密附件路徑");
+
+  let lastError=null;
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const headers=await authHeaders(null,attempt===1);
+      const res=await nativeFetch(url,{headers,cache:"no-store"});
+      if(res.status===401 && attempt===0){ await sleep(180); continue; }
+      if(!res.ok){
+        const data=await res.json().catch(()=>({}));
+        throw new Error(data.error||`附件下載失敗（${res.status}）`);
+      }
+      return await res.blob();
+    }catch(err){
+      lastError=err;
+      if(attempt===0){ await sleep(350); continue; }
+    }
   }
-  if(!isPrivateDownloadUrl(url)) throw new Error("不是私密附件路徑");
-  const headers=await authHeaders();
-  const res=await nativeFetch(toWorkerUrl(url),{headers,cache:"no-store"});
-  if(!res.ok){
-    const data=await res.json().catch(()=>({}));
-    throw new Error(data.error||`附件下載失敗（${res.status}）`);
-  }
-  return res.blob();
+  throw lastError || new Error("附件下載失敗");
 }
 
 async function openPrivateAttachment(pathOrUrl){
-  const blob=await fetchPrivateBlob(pathOrUrl);
-  const objectUrl=URL.createObjectURL(blob);
-  const w=window.open(objectUrl,"_blank","noopener");
-  if(!w){
-    const a=document.createElement("a");
-    a.href=objectUrl;
-    a.target="_blank";
-    a.rel="noopener";
-    a.click();
+  // Open synchronously during the user's click so browsers do not block the new tab
+  // while the authenticated file request is still running.
+  let popup=null;
+  try{
+    popup=window.open("about:blank","_blank");
+    if(popup){
+      popup.document.title="附件開啟中";
+      popup.document.body.innerHTML='<div style="font-family:system-ui,-apple-system,sans-serif;padding:28px;color:#4b3b66">附件開啟中，請稍候…</div>';
+    }
+  }catch{}
+
+  try{
+    const blob=await fetchPrivateBlob(pathOrUrl);
+    const objectUrl=URL.createObjectURL(blob);
+    if(popup && !popup.closed){
+      popup.location.replace(objectUrl);
+    }else{
+      const a=document.createElement("a");
+      a.href=objectUrl; a.target="_blank"; a.rel="noopener"; a.click();
+    }
+    setTimeout(()=>URL.revokeObjectURL(objectUrl),120000);
+  }catch(err){
+    try{ if(popup && !popup.closed) popup.close(); }catch{}
+    throw err;
   }
-  setTimeout(()=>URL.revokeObjectURL(objectUrl),60000);
 }
 
 function patchPrivateLinks(root=document){
-  root.querySelectorAll?.('a[href^="/download?system=budget"],a[href^="'+WORKER_URL+'/download?system=budget"]').forEach(a=>{
+  root.querySelectorAll?.('#recordList a, #existingVoucherBox a').forEach(a=>{
     if(a.dataset.privateBound==="1") return;
-    a.dataset.privateBound="1";
     const href=a.getAttribute("href")||"";
+    if(!isPrivateDownloadUrl(href)) return;
+    a.dataset.privateBound="1";
+    a.dataset.privateHref=href;
     a.removeAttribute("target");
     a.href="#";
     a.title="需登入權限，由 Worker 驗證後開啟";
@@ -111,9 +159,10 @@ function patchPrivateLinks(root=document){
       const old=a.textContent;
       try{
         a.textContent="附件開啟中…";
-        await openPrivateAttachment(href);
+        await openPrivateAttachment(a.dataset.privateHref||href);
       }catch(err){
-        alert("附件開啟失敗："+(err?.message||err));
+        const msg=err?.message||String(err);
+        alert("附件開啟失敗："+msg+(msg==="Failed to fetch"?"\n\n請重新整理頁面後再試；若仍出現此訊息，表示 Worker 連線被瀏覽器阻擋。":""));
       }finally{
         a.textContent=old;
       }
@@ -148,7 +197,7 @@ async function loadBudgetStorageStats(){
   const panel=document.getElementById("adminTodoPanel");
   if(!panel || panel.classList.contains("hidden") || !currentUser()) return;
   try{
-    const headers=await authHeaders();
+    const headers=await authHeaders(null,false);
     const res=await nativeFetch(WORKER_URL+"/stats?system=budget",{headers,cache:"no-store"});
     const data=await res.json().catch(()=>({}));
     if(!res.ok||data.ok===false) throw new Error(data.error||String(res.status));
@@ -168,10 +217,10 @@ async function loadBudgetStorageStats(){
   }
 }
 
-let statsTimer=null;
+let timer=null;
 function schedulePatch(){
-  clearTimeout(statsTimer);
-  statsTimer=setTimeout(()=>{
+  clearTimeout(timer);
+  timer=setTimeout(()=>{
     patchPrivateLinks();
     patchFileLimit();
     loadBudgetStorageStats();
@@ -183,5 +232,4 @@ observer.observe(document.documentElement,{childList:true,subtree:true});
 document.addEventListener("DOMContentLoaded",schedulePatch);
 window.addEventListener("load",schedulePatch);
 
-// Expose for debugging only; does not expose tokens.
 window.__budgetPrivateAssets={openPrivateAttachment,fetchPrivateBlob};
