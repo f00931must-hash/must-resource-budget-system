@@ -76,19 +76,32 @@ service cloud.firestore {
       allow create, update, delete: if manager();
     }
 
+    // First and second layers of the advance/disbursement workflow are manager-only.
+    match /advanceBatches/{batchId} {
+      allow read, create, update, delete: if manager();
+    }
+
+    match /advanceAllocations/{allocationId} {
+      allow read, create, update, delete: if manager();
+    }
+
     match /expenseRecords/{recordId} {
       allow read: if enabledUser();
 
       allow create: if enabledUser()
-        && request.resource.data.ownerEmail == email()
-        && request.resource.data.createdBy == email()
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) == false
         && request.resource.data.get('locked', false) == false
         && (
-          (manager() && submissionComplete(request.resource.data))
+          (
+            manager()
+            && request.resource.data.createdBy == email()
+            && submissionComplete(request.resource.data)
+          )
           || (
             !manager()
+            && request.resource.data.ownerEmail == email()
+            && request.resource.data.createdBy == email()
             && !voucherWaived(request.resource.data)
             && submissionComplete(request.resource.data)
           )
