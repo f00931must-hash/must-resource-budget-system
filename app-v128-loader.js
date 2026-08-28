@@ -1,7 +1,8 @@
-// Budget app loader v1.2.8
-// Keeps stable app-v120 behavior, routes vouchers private, and converts data deletion to 10-day soft delete.
+// Budget app loader v1.3.9
+// Keeps stable app-v120 behavior, routes vouchers private, converts data deletion to 10-day soft delete,
+// and renders the manager no-voucher action directly with each record card.
 
-const SOURCE_URL = "./app-v120.js?v=1.2.8-base";
+const SOURCE_URL = "./app-v120.js?v=1.3.9-base";
 
 async function loadBudgetApp(){
   const res = await fetch(SOURCE_URL, {cache:"no-store"});
@@ -30,6 +31,15 @@ async function loadBudgetApp(){
     'state.records=recSnap.docs.map(d=>({id:d.id,...d.data()}));',
     'state.records=recSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);'
   );
+
+  const oldApproveAction = 'if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;';
+  const newApproveAction = `if(isManager() && !r.estimated && !approved){
+      const waiverApproved=r.voucherNotRequired===true || r.voucherRequirementWaived===true;
+      if(!evidenceUrl && !waiverApproved) actions+=\`<button class="link-btn" data-manager-waive-voucher="\${r.id}">免附單據</button>\`;
+      actions+=\`<button class="link-btn approve" data-approve-record="\${r.id}">核對完成</button>\`;
+    }`;
+  if(!source.includes(oldApproveAction)) throw new Error("找不到管理員核對按鈕產生位置，已停止載入以避免免附單據流程失效。");
+  source = source.replace(oldApproveAction, newApproveAction);
 
   source = source.replace(
     /async function deleteCurrentPlan\(\)\{[\s\S]*?\n\}\n\nfunction openNewRecord/,
@@ -87,6 +97,7 @@ function switchView`);
 
   if(source.includes('form.append("system","shared")')) throw new Error("經費附件仍指向公開附件庫，已停止載入以保護資料。");
   if(!source.includes('form.append("system","budget")')) throw new Error("經費私密附件路由未正確套用。");
+  if(!source.includes('data-manager-waive-voucher')) throw new Error("免附單據管理員按鈕未正確寫入主畫面，已停止載入。");
   if(!source.includes('soft-delete-record') || !source.includes('soft-delete-plan') || !source.includes('soft-delete-category')) throw new Error("回收桶刪除保護未正確套用，已停止載入以避免永久誤刪。");
 
   const blob = new Blob([source], {type:"text/javascript"});
@@ -94,8 +105,7 @@ function switchView`);
   try{ await import(url); }
   finally{ URL.revokeObjectURL(url); }
 
-  // Capture plan restore before the generic recycle-bin restore handler so its categories return together.
-  await import("./budget-trash-plan-restore-v128.js?v=1.2.8");
+  await import("./budget-trash-plan-restore-v128.js?v=1.3.9");
 }
 
 loadBudgetApp().catch(err=>{
