@@ -85,6 +85,16 @@ service cloud.firestore {
       allow read, create, update, delete: if manager();
     }
 
+    // Reminder configuration and reminder history are manager-only.
+    match /reminderSettings/{planId} {
+      allow read, create, update, delete: if manager();
+    }
+
+    match /reminderLogs/{logId} {
+      allow read, create: if manager();
+      allow update, delete: if false;
+    }
+
     match /expenseRecords/{recordId} {
       allow read: if enabledUser();
 
