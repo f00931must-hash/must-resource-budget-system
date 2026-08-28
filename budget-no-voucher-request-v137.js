@@ -1,6 +1,6 @@
-// Budget no-voucher request flow v1.3.7
-// Teachers may declare a record as not requiring a voucher when submitting.
-// This is only a request. A manager must still explicitly approve the waiver before final review.
+// Budget no-voucher request flow v1.3.11
+// Teacher-side only: allows a teacher to request no-voucher handling when submitting.
+// This request NEVER equals manager approval. Manager approval is handled separately.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -9,9 +9,6 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID = "must-resource-budget-system";
-let profile = null;
-let isManager = false;
-let uiTimer = null;
 
 function budgetApp(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID) || null; }
 function ctx(){
@@ -32,7 +29,7 @@ function ensureRequestField(){
   label.className="check-row";
   label.style.cssText="margin-top:12px;border:1px solid #ddd6ee;border-radius:12px;padding:12px 14px;background:#fbf9ff;";
   label.innerHTML=`<input id="recordNoVoucherRequest" type="checkbox" />
-    <span><strong>此單無需附上單據</strong><small>勾選後可先送出，不需上傳附件；管理員核對時仍須再次按「免附單據」確認後才能核對完成。</small></span>`;
+    <span><strong>此單無需附上單據</strong><small>勾選後可先送出，不需上傳附件；這只是老師申請，管理員仍須另外按「免附單據」確認後才能核對完成。</small></span>`;
   voucher.insertAdjacentElement("beforebegin",label);
 
   document.getElementById("recordNoVoucherRequest")?.addEventListener("change",syncRequestUI);
@@ -44,11 +41,10 @@ function syncRequestUI(){
   const request=document.getElementById("recordNoVoucherRequest");
   if(!request) return;
   const estimated=document.getElementById("recordEstimated")?.checked===true;
-  const requested=request.checked===true;
+  if(estimated && request.checked) request.checked=false;
   request.disabled=estimated;
-  if(estimated && requested) request.checked=false;
 
-  const active=!estimated && request.checked;
+  const active=!estimated && request.checked===true;
   const file=document.getElementById("recordVoucherFile");
   const archived=document.getElementById("recordArchived");
   const confirmed=document.getElementById("recordAmountConfirm");
@@ -61,7 +57,7 @@ function syncRequestUI(){
   if(confirmed){ confirmed.disabled=active; if(active) confirmed.checked=false; }
   if(uploadWrap) uploadWrap.style.opacity=active?"0.5":"";
   if(confirmWrap) confirmWrap.style.opacity=active?"0.5":"";
-  if(active && hint) hint.textContent="此筆由老師申報為無需附單據；送出後仍需管理員再次確認「免附單據」才能核對完成。";
+  if(active && hint) hint.textContent="此筆僅由老師申請免附單據；管理員仍須另外按「免附單據」確認，才可核對完成。";
 }
 
 async function loadRequestForDialog(){
@@ -108,7 +104,8 @@ async function saveRequestedRecord(){
     getDocs(query(collection(c.db,"expenseRecords"),where("planId","==",planId)))
   ]);
   if(!userSnap.exists() || userSnap.data().enabled!==true) throw new Error("此帳號未獲授權");
-  profile=userSnap.data(); isManager=profile.role==="manager";
+  const profile=userSnap.data();
+  const isManager=profile.role==="manager";
   if(!planSnap.exists()) throw new Error("找不到目前計畫");
   if(!id && planSnap.data().active===false) throw new Error("此計畫已停用，無法新增使用紀錄");
   if(!catSnap.exists()) throw new Error("找不到經費項目");
@@ -135,6 +132,7 @@ async function saveRequestedRecord(){
     voucherNotRequiredRequested:true,
     voucherNotRequiredRequestedAt:serverTimestamp(),
     voucherNotRequiredRequestedBy:email,
+    // IMPORTANT: teacher request never sets manager approval fields.
     reviewStatus:"pending",reviewed:false,locked:false,note,
     ownerEmail:existing?.ownerEmail||email,
     ownerName:existing?.ownerName||profile.name||user.displayName||user.email,
@@ -142,6 +140,7 @@ async function saveRequestedRecord(){
     updatedAt:serverTimestamp(),updatedBy:email
   };
 
+  // Preserve any existing manager-waiver fields on edit; teacher-side request must never create/change them.
   if(id) await updateDoc(doc(c.db,"expenseRecords",id),data);
   else await addDoc(collection(c.db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
 
@@ -149,85 +148,19 @@ async function saveRequestedRecord(){
   location.reload();
 }
 
-async function refreshProfile(){
+async function approveConfirmedWaiver(id){
   const c=ctx(); if(!c?.auth.currentUser) return;
   const email=(c.auth.currentUser.email||"").toLowerCase();
-  if(!email) return;
-  try{
-    const snap=await getDoc(doc(c.db,"users",email));
-    profile=snap.exists()?snap.data():null;
-    isManager=!!profile && profile.enabled===true && profile.role==="manager";
-    scheduleManagerButtons();
-  }catch(err){ console.warn("load manager profile failed",err); }
-}
-
-function hasMissingVoucher(card){
-  return [...card.querySelectorAll(".danger-badge")].some(b=>b.textContent.trim()==="缺單據");
-}
-function scheduleManagerButtons(){ clearTimeout(uiTimer); uiTimer=setTimeout(patchManagerButtons,80); }
-function patchManagerButtons(){
-  if(!isManager) return;
-  document.querySelectorAll("#recordList .record-card").forEach(card=>{
-    const approve=card.querySelector("[data-approve-record]");
-    if(!approve || !hasMissingVoucher(card)) return;
-    const id=approve.dataset.approveRecord||"";
-    if(!id) return;
-    const actions=approve.closest(".record-actions");
-    if(!actions || actions.querySelector("[data-manager-waive-voucher]")) return;
-    const btn=document.createElement("button");
-    btn.className="link-btn";
-    btn.dataset.managerWaiveVoucher=id;
-    btn.textContent="免附單據";
-    btn.title="管理員確認此筆不需要核銷附件";
-    btn.addEventListener("click",async e=>{
-      e.preventDefault(); e.stopPropagation();
-      await managerWaive(id);
-    });
-    approve.insertAdjacentElement("beforebegin",btn);
-  });
-}
-
-async function managerWaive(id){
-  const c=ctx(); if(!c?.auth.currentUser || !isManager) return;
-  const snap=await getDoc(doc(c.db,"expenseRecords",id));
-  if(!snap.exists()) return alert("找不到此筆使用紀錄。");
-  const r=snap.data();
-  if(r.reviewStatus==="approved" || r.reviewed===true || r.locked===true) return alert("此筆已核銷並鎖定。");
-  if(r.voucherUrl||r.folderUrl) return alert("此筆已有核銷單據，不需要設定免附單據。");
-  if(r.voucherNotRequired===true || r.voucherRequirementWaived===true) return alert("此筆已經由管理員確認為免附單據。");
-
-  const requested=r.voucherNotRequiredRequested===true;
-  const msg=`確定將「${r.purpose||"此筆"}」設定為免附核銷單據？\n\n金額：${money(r.amount)}\n${requested?"老師已於送出時申報此單無需附上單據。":"此筆尚未由老師申報免附單據，但管理員仍可依實際情況確認。"}\n\n確認後才能進行「核對完成」。`;
-  if(!confirm(msg)) return;
-
-  const email=(c.auth.currentUser.email||"").toLowerCase();
-  try{
-    await updateDoc(doc(c.db,"expenseRecords",id),{
-      voucherNotRequired:true,
-      voucherRequirementWaived:true,
-      voucherRequirementWaivedBy:email,
-      voucherRequirementWaivedAt:serverTimestamp(),
-      amountConfirmed:true,
-      amountConfirmedByManagerWaiver:true,
-      updatedAt:serverTimestamp(),updatedBy:email
-    });
-    await addDoc(collection(c.db,"auditLogs"),{
-      type:"expense-voucher-waiver",targetId:id,
-      planId:r.planId||document.getElementById("planSelect")?.value||"",
-      action:"waive-voucher",actorEmail:email,createdAt:serverTimestamp()
-    });
-    location.reload();
-  }catch(err){ alert("設定免附單據失敗："+(err?.message||err)); }
-}
-
-async function approveWaived(id){
-  const c=ctx(); if(!c?.auth.currentUser || !isManager) return;
-  const snap=await getDoc(doc(c.db,"expenseRecords",id));
-  if(!snap.exists()) return;
-  const r=snap.data();
-  if(!(r.voucherNotRequired===true || r.voucherRequirementWaived===true)) return;
+  const [userSnap,recordSnap]=await Promise.all([
+    getDoc(doc(c.db,"users",email)),
+    getDoc(doc(c.db,"expenseRecords",id))
+  ]);
+  if(!userSnap.exists() || userSnap.data().enabled!==true || userSnap.data().role!=="manager") return;
+  if(!recordSnap.exists()) return;
+  const r=recordSnap.data();
+  if(r.amountConfirmedByManagerWaiver!==true) return;
   if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money(r.amount)}\n\n此筆已由管理員確認免附單據；完成後會鎖定。`)) return;
-  const email=(c.auth.currentUser.email||"").toLowerCase();
+
   await updateDoc(doc(c.db,"expenseRecords",id),{
     reviewStatus:"approved",reviewed:true,locked:true,
     reviewedAt:serverTimestamp(),reviewedBy:email,
@@ -240,7 +173,7 @@ async function approveWaived(id){
   location.reload();
 }
 
-// The main app has a submit handler in bubble phase. Capture the special no-voucher request first.
+// Teacher-side special submit: request no voucher and bypass normal attachment requirements.
 document.addEventListener("submit",async e=>{
   if(e.target?.id!=="recordForm") return;
   ensureRequestField();
@@ -260,27 +193,31 @@ document.addEventListener("submit",async e=>{
   }
 },true);
 
-// Manager final review: if no voucher exists, require the explicit waiver step first.
+// Manager final review: teacher request alone is never enough.
 document.addEventListener("click",async e=>{
   const approve=e.target.closest?.("[data-approve-record]");
-  if(!approve || !isManager) return;
+  if(!approve) return;
   const id=approve.dataset.approveRecord||"";
   if(!id) return;
   const c=ctx(); if(!c) return;
   const snap=await getDoc(doc(c.db,"expenseRecords",id));
   if(!snap.exists()) return;
   const r=snap.data();
-  const waived=r.voucherNotRequired===true || r.voucherRequirementWaived===true;
   const hasVoucher=!!(r.voucherUrl||r.folderUrl);
-  if(waived){
-    e.preventDefault(); e.stopImmediatePropagation();
-    try{ await approveWaived(id); }catch(err){ alert("核對失敗："+(err?.message||err)); }
+  const managerWaived=r.amountConfirmedByManagerWaiver===true;
+
+  if(managerWaived){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    try{ await approveConfirmedWaiver(id); }catch(err){ alert("核對失敗："+(err?.message||err)); }
     return;
   }
+
   if(!hasVoucher){
-    e.preventDefault(); e.stopImmediatePropagation();
+    e.preventDefault();
+    e.stopImmediatePropagation();
     alert(r.voucherNotRequiredRequested===true
-      ? "此筆老師已申報『此單無需附上單據』。請先按『免附單據』由管理員再次確認，才能核對完成。"
+      ? "此筆老師已申請『此單無需附上單據』，但尚未經管理員確認。請先按『免附單據』，再進行核對完成。"
       : "此筆缺少核銷單據。若確實不需附件，請先按『免附單據』確認後再核對。");
   }
 },true);
@@ -294,18 +231,9 @@ document.addEventListener("click",e=>{
   if(e.target.closest?.("[data-edit-record]")) setTimeout(loadRequestForDialog,60);
 },true);
 
-const observer=new MutationObserver(()=>{
-  ensureRequestField();
-  scheduleManagerButtons();
-});
+// Only maintain the teacher-side form field. No manager button injection here.
+const observer=new MutationObserver(()=>ensureRequestField());
 observer.observe(document.documentElement,{childList:true,subtree:true});
 
-document.addEventListener("DOMContentLoaded",()=>{
-  ensureRequestField();
-  setTimeout(refreshProfile,300);
-});
-window.addEventListener("load",()=>{
-  ensureRequestField();
-  setTimeout(refreshProfile,500);
-});
-setInterval(()=>{ if(!profile) refreshProfile(); else scheduleManagerButtons(); },1500);
+document.addEventListener("DOMContentLoaded",ensureRequestField);
+window.addEventListener("load",ensureRequestField);
