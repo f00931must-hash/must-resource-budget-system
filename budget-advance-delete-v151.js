@@ -1,8 +1,9 @@
-// Budget advance manager-only delete controls v1.5.1
+// Budget advance manager-only delete controls v1.5.2
 // Safe deletion rules:
 // 1) Advance batch can be deleted only when it has no active allocations.
 // 2) Allocation can be deleted only while its linked expense record is still estimated and unlocked.
 // 3) Only manager users can see/use these controls; Firestore rules also enforce manager-only access.
+// 4) Dynamic batch selector is created after module load, so selection state is observed through delegated events + mutations.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -42,7 +43,11 @@ function ensureBatchDeleteButton(){
     edit.insertAdjacentElement("afterend",btn);
     btn.addEventListener("click",deleteBatch);
   }
-  btn.disabled=!currentBatchId();
+  // Important: the selector is populated dynamically after this module loads.
+  // Recalculate disabled state every patch instead of relying on an early event binding.
+  const id=String(select.value||"").trim();
+  btn.disabled=!id;
+  btn.setAttribute("aria-disabled",id?"false":"true");
 }
 
 function ensureAllocationDeleteButtons(){
@@ -70,7 +75,7 @@ function schedule(ms=60){clearTimeout(timer);timer=setTimeout(patch,ms);}
 async function deleteBatch(){
   try{
     const email=await verifyManager();
-    const id=currentBatchId(); if(!id)return;
+    const id=currentBatchId(); if(!id)return alert("請先選擇要刪除的預支／動支批次。");
     const b=await getDoc(doc(db,"advanceBatches",id));
     if(!b.exists())return alert("找不到此預支／動支批次。");
     const aSnap=await getDocs(query(collection(db,"advanceAllocations"),where("batchId","==",id)));
@@ -129,6 +134,19 @@ window.addEventListener("click",e=>{
   deleteAllocation(btn.dataset.deleteAdvanceAllocation||"");
 },true);
 
+// Delegated because #advanceBatchSelect does not exist yet when this module first loads.
+document.addEventListener("input",e=>{
+  if(e.target?.id==="advanceBatchSelect")schedule(0);
+},true);
+document.addEventListener("change",e=>{
+  if(e.target?.id==="advanceBatchSelect")schedule(0);
+},true);
+document.addEventListener("click",e=>{
+  if(e.target?.closest?.("#advanceTab,#newAdvanceBatchBtn,#editAdvanceBatchBtn")){
+    [0,80,220].forEach(ms=>setTimeout(patch,ms));
+  }
+},true);
+
 async function init(){
   for(let i=0;i<120;i++){
     const a=app(); if(a){auth=getAuth(a);db=getFirestore(a);break;}
@@ -142,11 +160,10 @@ async function init(){
       const u=await getDoc(doc(db,"users",user.email.toLowerCase()));
       manager=u.exists()&&u.data().enabled===true&&u.data().role==="manager";
       currentEmail=user.email.toLowerCase();
-      if(manager){[100,300,700].forEach(ms=>setTimeout(patch,ms));}
+      if(manager){[100,300,700,1200].forEach(ms=>setTimeout(patch,ms));}
     }catch(err){console.warn("advance delete init failed",err);}
   });
 }
 
-new MutationObserver(()=>{if(manager)schedule();}).observe(document.body,{childList:true,subtree:true});
-document.getElementById("advanceBatchSelect")?.addEventListener("change",()=>schedule(0));
+new MutationObserver(()=>{if(manager)schedule();}).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:["disabled","selected"]});
 init();
