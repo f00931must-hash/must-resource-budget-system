@@ -12,7 +12,7 @@ const VALID_VIEWS=new Set(["dashboard","records","budget","trash"]);
 let db=null;
 let auth=null;
 let countTimer=null;
-let lastCountSignature="";
+let booting=true;
 
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
 function visibleTab(view){
@@ -29,9 +29,7 @@ function getSavedView(){
     return VALID_VIEWS.has(v)?v:"";
   }catch{return "";}
 }
-function activeView(){
-  return document.querySelector(".view.active-view")?.id || "";
-}
+function activeView(){ return document.querySelector(".view.active-view")?.id || ""; }
 function applyView(view){
   if(!VALID_VIEWS.has(view) || !visibleTab(view)) return false;
   const section=document.getElementById(view);
@@ -43,30 +41,42 @@ function applyView(view){
 }
 function restoreView(){
   const saved=getSavedView();
-  if(saved && applyView(saved)) return;
+  if(saved) return applyView(saved);
   const current=activeView();
-  if(current) saveActiveView(current);
+  if(current){ saveActiveView(current); return true; }
+  return false;
 }
 
-// Capture both user tab clicks and programmatic view changes.
+// Capture user tab clicks immediately, before any action can reload the page.
 document.addEventListener("click",e=>{
   const tab=e.target.closest?.(".tab[data-view]");
-  if(tab) saveActiveView(tab.dataset.view||"");
+  if(tab){
+    saveActiveView(tab.dataset.view||"");
+    booting=false;
+  }
 },true);
 
 let viewMutationTimer=null;
 const viewObserver=new MutationObserver(()=>{
   clearTimeout(viewMutationTimer);
   viewMutationTimer=setTimeout(()=>{
+    if(booting){
+      // During startup do not let the default dashboard overwrite a previously saved tab.
+      if(getSavedView()) restoreView();
+      return;
+    }
     const v=activeView();
     if(v) saveActiveView(v);
-    else restoreView();
   },40);
 });
 viewObserver.observe(document.documentElement,{subtree:true,attributes:true,attributeFilter:["class"],childList:true});
 
-document.addEventListener("DOMContentLoaded",()=>setTimeout(restoreView,80));
-window.addEventListener("load",()=>setTimeout(restoreView,350));
+document.addEventListener("DOMContentLoaded",()=>{
+  setTimeout(()=>{ restoreView(); },80);
+});
+window.addEventListener("load",()=>{
+  setTimeout(()=>{ restoreView(); },350);
+});
 
 function cleanOptionLabel(text){
   return String(text||"").replace(/（\d+）\s*$/u,"").trim();
@@ -86,7 +96,6 @@ async function syncCategoryCounts(){
     const rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.deleted!==true);
     const counts=new Map();
     for(const r of rows) counts.set(r.categoryId,(counts.get(r.categoryId)||0)+1);
-    lastCountSignature=JSON.stringify([planId,rows.length,[...counts.entries()].sort()]);
 
     [...select.options].forEach((o,i)=>{
       if(i===0 || !o.value){
@@ -109,24 +118,22 @@ function scheduleCounts(delay=220){
 async function init(){
   for(let i=0;i<120;i++){
     const a=app();
-    if(a){
-      auth=getAuth(a); db=getFirestore(a); break;
-    }
+    if(a){ auth=getAuth(a); db=getFirestore(a); break; }
     await new Promise(r=>setTimeout(r,50));
   }
   if(!auth||!db) return;
 
-  const planSelect=document.getElementById("planSelect");
-  planSelect?.addEventListener("change",()=>{ lastCountSignature=""; scheduleCounts(260); });
-
+  document.getElementById("planSelect")?.addEventListener("change",()=>scheduleCounts(260));
   const filter=document.getElementById("filterCategory");
-  if(filter){
-    new MutationObserver(()=>scheduleCounts(260)).observe(filter,{childList:true});
-  }
+  if(filter) new MutationObserver(()=>scheduleCounts(260)).observe(filter,{childList:true});
 
   onAuthStateChanged(auth,user=>{
     if(!user) return;
-    setTimeout(()=>{ restoreView(); scheduleCounts(320); },320);
+    setTimeout(()=>{
+      restoreView();
+      booting=false;
+      scheduleCounts(320);
+    },320);
   });
 }
 
