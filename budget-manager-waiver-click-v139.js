@@ -1,4 +1,4 @@
-// Budget manager event shield v1.4.1
+// Budget manager event shield v1.4.3
 // Runs on WINDOW capture so older document-level handlers never receive manager waiver/review clicks.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
@@ -9,7 +9,7 @@ const PROJECT_ID="must-resource-budget-system";
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
 function money(n){ return new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0}).format(Number(n||0)); }
 function approved(r){ return r?.reviewStatus==="approved" || r?.reviewed===true || r?.locked===true; }
-function managerConfirmed(r){ return r?.voucherWaiverManagerConfirmed===true; }
+function managerConfirmed(r){ return r?.voucherWaiverManagerConfirmed===true || r?.amountConfirmedByManagerWaiver===true; }
 function hasVoucher(r){ return !!(r?.voucherUrl||r?.folderUrl); }
 
 async function ctxFor(id){
@@ -78,7 +78,7 @@ async function revokeWaiver(id){
 async function review(id){
   try{
     const {db,email,r}=await ctxFor(id);
-    if(hasVoucher(r)) return false; // Let the normal main-app review flow handle attached vouchers.
+    if(hasVoucher(r)) return false;
     if(!managerConfirmed(r)){
       alert(r.voucherNotRequiredRequested===true
         ? "此筆老師已申請『此單無需附上單據』。請先按『免附單據』由管理員二次確認，再核對完成。"
@@ -101,7 +101,6 @@ async function review(id){
   }catch(err){ alert("核對失敗："+(err?.message||err)); return true; }
 }
 
-// Window capture is earlier than every document capture/bubble listener, even if this module loads later.
 window.addEventListener("click",async e=>{
   const waive=e.target.closest?.("[data-manager-waive-voucher]");
   if(waive){
@@ -127,7 +126,7 @@ window.addEventListener("click",async e=>{
       const u=await getDoc(doc(db,"users",user.email.toLowerCase()));
       if(!u.exists() || u.data().enabled!==true || u.data().role!=="manager") return;
       const r=await getDoc(doc(db,"expenseRecords",id));
-      if(!r.exists() || hasVoucher(r.data())) return; // attached voucher: normal app handles it
+      if(!r.exists() || hasVoucher(r.data())) return;
       e.preventDefault(); e.stopImmediatePropagation();
       await review(id);
     }catch(err){
@@ -136,3 +135,6 @@ window.addEventListener("click",async e=>{
     }
   }
 },true);
+
+// Keep the actual issue-filter list synchronized with the todo counters.
+import("./budget-issue-filter-v143.js?v=1.4.3");
