@@ -4,8 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>資源教室經費管理系統</title>
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=1.6.3" />
-  <link rel="stylesheet" href="./styles.css?v=1.6.3" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=1.6.5" />
+  <link rel="stylesheet" href="./styles.css?v=1.6.5" />
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
@@ -50,7 +50,7 @@
         <div class="panel filters review-filters">
           <select id="filterCategory"><option value="">全部經費項目</option></select>
           <select id="filterSemester"><option value="">全部學期</option></select>
-          <select id="filterReview"><option value="">全部核銷狀態</option><option value="pending">待核對</option><option value="approved">已核銷</option><option value="estimated">預估</option></select>
+          <select id="filterReview"><option value="">全部核銷狀態</option><option value="pending">待核對</option><option value="approved">已核銷</option><option value="estimated">預估／請購中</option></select>
           <select id="filterIssue"><option value="">全部資料狀態</option><option value="missingVoucher">缺少核銷單據</option><option value="unconfirmed">未確認 Key 金額</option></select>
           <input id="searchInput" placeholder="搜尋用途、老師或學期" />
         </div>
@@ -80,14 +80,23 @@
     <label>經費項目<select id="recordCategory" required></select></label>
     <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：A4影印紙" /></label>
     <div class="two-cols"><label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label><label>學期<input id="recordSemester" required maxlength="5" pattern="\d{3}-[12]" placeholder="例如：114-2、115-1" /></label></div>
-    <label class="check-row estimate-row"><input id="recordEstimated" type="checkbox" /><span><strong>此筆為預估金額</strong><small>預估金額可跳過核銷單據與金額確認，會先扣除「計畫剩餘額度」，但不計入「已核銷」。</small></span></label>
+
+    <div class="estimate-row" style="padding:14px 16px;border:1px solid #e7def3;border-radius:14px;background:#fcfaff">
+      <input id="recordEstimated" type="checkbox" hidden />
+      <strong style="display:block;margin-bottom:8px">此筆尚未進入核銷</strong>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <label class="check-row" style="margin:0"><input type="radio" name="recordPreStage" id="recordStageEstimated" value="estimated" /><span><strong>預估</strong></span></label>
+        <label class="check-row" style="margin:0"><input type="radio" name="recordPreStage" id="recordStagePurchasing" value="purchasing" /><span><strong>請購中</strong></span></label>
+      </div>
+      <small style="display:block;margin-top:8px">「預估」與「請購中」皆可先不附核銷單據；若兩者都未勾選，則依原本正式核銷流程辦理。</small>
+    </div>
 
     <div class="voucher-upload">
-      <label>核銷單據（預估可空白）<input id="recordVoucherFile" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" /></label>
+      <label>核銷單據（預估／請購中可空白）<input id="recordVoucherFile" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" /></label>
       <p id="voucherRequirementHint" class="hint">正式送核銷前，請上傳核銷單據並確認單據金額與 Key 的金額相同。</p>
       <div id="existingVoucherBox" class="existing-voucher hidden"></div>
       <label id="uploadConfirmWrap" class="check-row confirm-row"><input id="recordArchived" type="checkbox" /><span><strong>我已上傳核銷單據</strong></span></label>
-      <label id="manualConfirmWrap" class="check-row confirm-row"><input id="recordAmountConfirm" type="checkbox" /><span><strong>請確定核銷單據是否與 Key 的金額相同</strong><small>確認無誤後勾選；非預估資料必須勾選才能儲存。</small></span></label>
+      <label id="manualConfirmWrap" class="check-row confirm-row"><input id="recordAmountConfirm" type="checkbox" /><span><strong>請確定核銷單據是否與 Key 的金額相同</strong><small>確認無誤後勾選；正式核銷資料必須勾選才能儲存。</small></span></label>
     </div>
     <label>備註<textarea id="recordNote" rows="3" maxlength="500"></textarea></label>
     <div class="dialog-actions"><button type="button" class="ghost-btn" data-close="recordDialog">取消</button><button id="recordSaveBtn" class="primary-btn" value="default">儲存</button></div>
@@ -103,24 +112,25 @@
   </form></dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script type="module" src="./budget-private-assets-v123.js?v=1.6.3"></script>
-  <script type="module" src="./app-v128-loader.js?v=1.6.3"></script>
-  <script type="module" src="./budget-attachment-delete-v126.js?v=1.6.3"></script>
-  <script type="module" src="./budget-batch-category-v127.js?v=1.6.3"></script>
-  <script type="module" src="./budget-trash-v128.js?v=1.6.3"></script>
-  <script type="module" src="./budget-ui-state-v129.js?v=1.6.3"></script>
-  <script type="module" src="./budget-private-open-fix-v132.js?v=1.6.3"></script>
-  <script type="module" src="./budget-stable-remaining-v133.js?v=1.6.3"></script>
-  <script type="module" src="./budget-no-voucher-request-v137.js?v=1.6.3"></script>
-  <script type="module" src="./budget-manager-waiver-click-v139.js?v=1.6.3"></script>
-  <script type="module" src="./budget-admin-clean-v140.js?v=1.6.3"></script>
-  <script type="module" src="./budget-issue-filter-v143.js?v=1.6.3"></script>
-  <script type="module" src="./budget-advance-v150.js?v=1.6.3"></script>
-  <script type="module" src="./budget-advance-link-existing-v153.js?v=1.6.3"></script>
-  <script type="module" src="./budget-estimate-to-actual-v150.js?v=1.6.3"></script>
-  <script type="module" src="./budget-advance-delete-v151.js?v=1.6.3"></script>
-  <script type="module" src="./budget-advance-auto-refresh-v154.js?v=1.6.3"></script>
-  <script type="module" src="./budget-reminder-v160.js?v=1.6.3"></script>
-  <script type="module" src="./budget-reminder-window-v163.js?v=1.6.3"></script>
+  <script type="module" src="./budget-private-assets-v123.js?v=1.6.5"></script>
+  <script type="module" src="./app-v128-loader.js?v=1.6.5"></script>
+  <script type="module" src="./budget-attachment-delete-v126.js?v=1.6.5"></script>
+  <script type="module" src="./budget-batch-category-v127.js?v=1.6.5"></script>
+  <script type="module" src="./budget-trash-v128.js?v=1.6.5"></script>
+  <script type="module" src="./budget-ui-state-v129.js?v=1.6.5"></script>
+  <script type="module" src="./budget-private-open-fix-v132.js?v=1.6.5"></script>
+  <script type="module" src="./budget-stable-remaining-v133.js?v=1.6.5"></script>
+  <script type="module" src="./budget-no-voucher-request-v137.js?v=1.6.5"></script>
+  <script type="module" src="./budget-manager-waiver-click-v139.js?v=1.6.5"></script>
+  <script type="module" src="./budget-admin-clean-v140.js?v=1.6.5"></script>
+  <script type="module" src="./budget-issue-filter-v143.js?v=1.6.5"></script>
+  <script type="module" src="./budget-advance-v150.js?v=1.6.5"></script>
+  <script type="module" src="./budget-advance-link-existing-v153.js?v=1.6.5"></script>
+  <script type="module" src="./budget-estimate-to-actual-v150.js?v=1.6.5"></script>
+  <script type="module" src="./budget-advance-delete-v151.js?v=1.6.5"></script>
+  <script type="module" src="./budget-advance-auto-refresh-v154.js?v=1.6.5"></script>
+  <script type="module" src="./budget-reminder-v160.js?v=1.6.5"></script>
+  <script type="module" src="./budget-reminder-window-v163.js?v=1.6.5"></script>
+  <script type="module" src="./budget-estimate-stage-v165.js?v=1.6.5"></script>
 </body>
 </html>
