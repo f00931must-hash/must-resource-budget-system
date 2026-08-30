@@ -47,5 +47,7 @@ function install(){
 
 for(let i=0;i<40&&!install();i++) await new Promise(r=>setTimeout(r,50));
 
+// v1.6.6 reminder compatibility: the old second reminder slot now represents "請購中".
+await import("./budget-reminder-purchasing-rule-v166.js?v=1.6.6");
 // Load the safe end-to-end automatic notification test button.
 await import("./budget-reminder-auto-test-v166.js?v=1.6.6");
