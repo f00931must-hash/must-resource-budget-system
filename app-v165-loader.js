@@ -50,6 +50,13 @@ async function loadStageAwareBudgetApp(){
 
   loader = loader.replace(marker,patch+marker);
 
+  // This wrapper itself is imported from a Blob, so make the stable loader's
+  // one relative dynamic import absolute before evaluating it.
+  loader = loader.replace(
+    'await import("./budget-trash-plan-restore-v128.js?v=1.3.10");',
+    'await import(new URL("./budget-trash-plan-restore-v128.js?v=1.3.10", location.href).href);'
+  );
+
   const blob = new Blob([loader],{type:"text/javascript"});
   const url = URL.createObjectURL(blob);
   try{ await import(url); }
