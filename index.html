@@ -85,10 +85,10 @@
       <input id="recordEstimated" type="checkbox" hidden />
       <strong style="display:block;margin-bottom:8px">此筆尚未進入核銷</strong>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <label class="check-row" style="margin:0"><input type="radio" name="recordPreStage" id="recordStageEstimated" value="estimated" /><span><strong>預估</strong></span></label>
-        <label class="check-row" style="margin:0"><input type="radio" name="recordPreStage" id="recordStagePurchasing" value="purchasing" /><span><strong>請購中</strong></span></label>
+        <label class="check-row" style="margin:0"><input type="checkbox" id="recordStageEstimated" /><span><strong>預估</strong></span></label>
+        <label class="check-row" style="margin:0"><input type="checkbox" id="recordStagePurchasing" /><span><strong>請購中</strong></span></label>
       </div>
-      <small style="display:block;margin-top:8px">「預估」與「請購中」皆可先不附核銷單據；若兩者都未勾選，則依原本正式核銷流程辦理。</small>
+      <small style="display:block;margin-top:8px">「預估」與「請購中」皆可先不附核銷單據；兩者都未勾選時，依原本正式核銷流程辦理。</small>
     </div>
 
     <div class="voucher-upload">
