@@ -1,8 +1,8 @@
-// Budget app stage loader v1.6.5
-// Wraps the current stable app-v128-loader without changing existing records.
+// Budget app stage loader v1.6.5.1
+// Safe wrapper around the current stable app-v128-loader.
 // Adds an optional estimateStage field while preserving estimated=true compatibility.
 
-const BASE_LOADER = "./app-v128-loader.js?v=1.6.5-base";
+const BASE_LOADER = "./app-v128-loader.js?v=1.6.5.1-base";
 
 async function loadStageAwareBudgetApp(){
   const res = await fetch(BASE_LOADER,{cache:"no-store"});
@@ -12,46 +12,43 @@ async function loadStageAwareBudgetApp(){
   const marker = `  if(source.includes('form.append("system","shared")')) throw new Error("經費附件仍指向公開附件庫，已停止載入以保護資料。");`;
   if(!loader.includes(marker)) throw new Error("找不到經費主載入器安全檢查位置，已停止載入。");
 
-  const patch = `
-  // v1.6.5: 預估／請購中共用 estimated=true，僅新增 estimateStage 顯示分類。
-  source = source.replace(
-    'const statusBadge=r.estimated===true\\n      ? \'<span class="status estimated">預估</span>\'',
-    'const statusBadge=r.estimated===true\\n      ? (r.estimateStage==="purchasing"?\'<span class="status estimated">請購中</span>\':\'<span class="status estimated">預估</span>\')'
-  );
+  const replacements = [
+    [
+      `const statusBadge=r.estimated===true\n      ? '<span class="status estimated">預估</span>'`,
+      `const statusBadge=r.estimated===true\n      ? (r.estimateStage==="purchasing"?'<span class="status estimated">請購中</span>':'<span class="status estimated">預估</span>')`
+    ],
+    [
+      `$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;`,
+      `$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true; if($("recordStageEstimated")) $("recordStageEstimated").checked=r.estimated===true&&r.estimateStage!=="purchasing"; if($("recordStagePurchasing")) $("recordStagePurchasing").checked=r.estimated===true&&r.estimateStage==="purchasing";`
+    ],
+    [
+      `const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;`,
+      `const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked, estimateStage=estimated?($("recordStagePurchasing")?.checked?"purchasing":"estimated"):"";`
+    ],
+    [
+      `const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,`,
+      `const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,estimateStage,`
+    ],
+    [
+      `? "預估金額可先不附核銷單據，也不需要勾選金額確認。"`,
+      `? "預估／請購中可先不附核銷單據，也不需要勾選金額確認。"`
+    ],
+    [
+      `toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");`,
+      `toast(estimated?(estimateStage==="purchasing"?"請購中紀錄已儲存":"預估紀錄已儲存"):"已送出，等待管理員核對");`
+    ]
+  ];
 
-  source = source.replace(
-    '$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;',
-    '$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true; if($("recordStageEstimated")) $("recordStageEstimated").checked=r.estimated===true&&r.estimateStage!=="purchasing"; if($("recordStagePurchasing")) $("recordStagePurchasing").checked=r.estimated===true&&r.estimateStage==="purchasing";'
-  );
-
-  source = source.replace(
-    'const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;',
-    'const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked, estimateStage=estimated?($("recordStagePurchasing")?.checked?"purchasing":"estimated"):"";'
-  );
-
-  source = source.replace(
-    'const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,',
-    'const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,estimateStage,'
-  );
-
-  source = source.replace(
-    '? "預估金額可先不附核銷單據，也不需要勾選金額確認。"',
-    '? "預估／請購中可先不附核銷單據，也不需要勾選金額確認。"'
-  );
-
-  source = source.replace(
-    'toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");',
-    'toast(estimated?(estimateStage==="purchasing"?"請購中紀錄已儲存":"預估紀錄已儲存"):"已送出，等待管理員核對");'
-  );
-
-  if(!source.includes('estimateStage')) throw new Error("預估／請購中分類未正確套用，已停止載入。");
-
-`;
+  let patch = "\n  // v1.6.5.1 預估／請購中相容分類\n";
+  for(const [from,to] of replacements){
+    patch += `  source = source.replace(${JSON.stringify(from)}, ${JSON.stringify(to)});\n`;
+  }
+  patch += `  if(!source.includes("estimateStage")) throw new Error("預估／請購中分類未正確套用，已停止載入。");\n\n`;
 
   loader = loader.replace(marker,patch+marker);
 
-  // This wrapper itself is imported from a Blob, so make the stable loader's
-  // one relative dynamic import absolute before evaluating it.
+  // The stable loader is evaluated from a Blob, so its relative dynamic import
+  // must be made absolute before evaluation.
   loader = loader.replace(
     'await import("./budget-trash-plan-restore-v128.js?v=1.3.10");',
     'await import(new URL("./budget-trash-plan-restore-v128.js?v=1.3.10", location.href).href);'
