@@ -1,4 +1,4 @@
-// Budget estimate stage controls v1.6.5
+// Budget estimate stage controls v1.6.6
 // UI-only compatibility layer. Keeps the existing hidden #recordEstimated checkbox
 // as the canonical bypass flag, while allowing two visible stages: 預估 / 請購中.
 
@@ -37,8 +37,6 @@ function install(){
   estimated.addEventListener("change",()=>syncFromVisible(estimated));
   purchasing.addEventListener("change",()=>syncFromVisible(purchasing));
 
-  // Form reset occurs inside the stable app before opening a new record.
-  // A microtask keeps the visible tags aligned with that reset.
   dialog?.addEventListener("close",()=>{
     if($("recordId")?.value==="") clearVisibleOnNew();
   });
@@ -48,3 +46,6 @@ function install(){
 }
 
 for(let i=0;i<40&&!install();i++) await new Promise(r=>setTimeout(r,50));
+
+// Load the safe end-to-end automatic notification test button.
+await import("./budget-reminder-auto-test-v166.js?v=1.6.6");
