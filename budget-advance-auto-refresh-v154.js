@@ -19,3 +19,7 @@ function requestRefresh(ms=120){
 
 // Only explicit post-write requests are handled here.
 window.addEventListener("budget-advance-refresh",()=>requestRefresh(120));
+
+// Regular teachers get a separate, read-only allocation view with one action:
+// confirm receipt of the allocated amount.
+await import("./budget-my-advance-v170.js?v=1.7.0");
