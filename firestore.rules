@@ -9,6 +9,13 @@ service cloud.firestore {
       return request.auth.token.email.lower();
     }
 
+    // Permanent bootstrap account for budget permission synchronization.
+    // This prevents the users collection from locking out the primary manager
+    // if their own users document is temporarily missing or changed during testing.
+    function primaryManager() {
+      return signedIn() && email() == 'master004400@gmail.com';
+    }
+
     function userDoc() {
       return get(/databases/$(database)/documents/users/$(email()));
     }
@@ -20,7 +27,8 @@ service cloud.firestore {
     }
 
     function manager() {
-      return enabledUser() && userDoc().data.role == 'manager';
+      return primaryManager()
+        || (enabledUser() && userDoc().data.role == 'manager');
     }
 
     function recordLocked() {
@@ -62,7 +70,8 @@ service cloud.firestore {
     }
 
     match /users/{userEmail} {
-      allow read: if enabledUser() && (manager() || userEmail == email());
+      allow read: if manager()
+        || (enabledUser() && userEmail == email());
       allow create, update, delete: if manager();
     }
 
