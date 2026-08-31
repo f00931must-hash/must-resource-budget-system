@@ -1,8 +1,25 @@
-// Budget advance startup bridge v1.7.3
-// No observers, polling, synthetic plan changes, or post-save page reloads.
-// The manager advance module already refreshes after successful writes.
-// This file only handles the startup race where #advance is restored before
-// the main app has populated #planSelect.
+// Budget advance startup + explicit refresh bridge v1.7.4
+// No permanent observers, polling, repeated refreshes, or page reloads.
+// The manager advance module refreshes after its own successful writes.
+// This file only handles:
+// 1) startup race when #advance is restored before #planSelect is ready;
+// 2) one explicit refresh requested by helper modules after a successful write
+//    such as unlink/delete allocation.
+
+let explicitRefreshTimer=null;
+
+function requestExplicitAdvanceRefresh(ms=80){
+  clearTimeout(explicitRefreshTimer);
+  explicitRefreshTimer=setTimeout(()=>{
+    if(location.hash!=="#advance" && !document.getElementById("advance")?.classList.contains("active-view")) return;
+    const plan=document.getElementById("planSelect")?.value||"";
+    const tab=document.getElementById("advanceTab");
+    if(!plan||!tab) return;
+    // One synthetic click reuses the manager module's existing loadAll() path.
+    // No observer or repeating timer is created.
+    tab.click();
+  },ms);
+}
 
 async function restoreAdvanceWhenPlanReady(){
   if(location.hash!=="#advance") return;
@@ -21,8 +38,10 @@ async function restoreAdvanceWhenPlanReady(){
   }
 }
 
+window.addEventListener("budget-advance-refresh",()=>requestExplicitAdvanceRefresh(80));
+
 restoreAdvanceWhenPlanReady().catch(err=>console.warn("advance startup restore failed",err));
 
 // Regular teachers get a separate allocation view with one action:
 // confirm receipt of the allocated amount.
-await import("./budget-my-advance-v170.js?v=1.7.3");
+await import("./budget-my-advance-v170.js?v=1.7.4");
