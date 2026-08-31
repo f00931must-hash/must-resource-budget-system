@@ -1,5 +1,6 @@
-// Budget manager event shield v1.6.9
-// All manager review clicks are handled here once, so older handlers never show duplicate confirms.
+// Budget manager event shield v1.7.2
+// All manager review clicks are intercepted synchronously here so older handlers
+// cannot receive the same click and show duplicate confirmation dialogs.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -85,26 +86,31 @@ async function reviewOnce(id){
   finally{ reviewBusy=false; }
 }
 
-window.addEventListener("click",async e=>{
+// IMPORTANT: capture on window and stop the event BEFORE any await.
+// Older document/button handlers must never see the same manager review click.
+window.addEventListener("click",e=>{
   const waive=e.target.closest?.("[data-manager-waive-voucher]");
-  if(waive){ e.preventDefault(); e.stopImmediatePropagation(); await confirmWaiver(waive.dataset.managerWaiveVoucher||""); return; }
+  if(waive){
+    e.preventDefault(); e.stopImmediatePropagation();
+    void confirmWaiver(waive.dataset.managerWaiveVoucher||"");
+    return;
+  }
 
   const revoke=e.target.closest?.("[data-manager-revoke-waiver]");
-  if(revoke){ e.preventDefault(); e.stopImmediatePropagation(); await revokeWaiver(revoke.dataset.managerRevokeWaiver||""); return; }
+  if(revoke){
+    e.preventDefault(); e.stopImmediatePropagation();
+    void revokeWaiver(revoke.dataset.managerRevokeWaiver||"");
+    return;
+  }
 
   const approveBtn=e.target.closest?.("[data-approve-record]");
   if(!approveBtn) return;
-  const id=approveBtn.dataset.approveRecord||""; if(!id) return;
-  const a=app(),user=a?getAuth(a).currentUser:null; if(!user?.email) return;
-  try{
-    const db=getFirestore(a),u=await getDoc(doc(db,"users",user.email.toLowerCase()));
-    if(!u.exists() || u.data().enabled!==true || u.data().role!=="manager") return;
-    e.preventDefault(); e.stopImmediatePropagation();
-    await reviewOnce(id);
-  }catch(err){
-    e.preventDefault(); e.stopImmediatePropagation();
-    alert("核對失敗："+(err?.message||err));
-  }
-},true);
+  const id=approveBtn.dataset.approveRecord||"";
+  if(!id) return;
 
-import("./budget-issue-filter-v143.js?v=1.6.9");
+  // data-approve-record is a manager-only control. Stop immediately, then verify again
+  // in Firestore inside reviewOnce before any write is allowed.
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  void reviewOnce(id);
+},true);
