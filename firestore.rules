@@ -76,13 +76,37 @@ service cloud.firestore {
       allow create, update, delete: if manager();
     }
 
-    // First and second layers of the advance/disbursement workflow are manager-only.
+    // Advance/disbursement batches remain manager-managed, but enabled users may read
+    // the batch metadata needed to understand their own allocations.
     match /advanceBatches/{batchId} {
-      allow read, create, update, delete: if manager();
+      allow read: if enabledUser();
+      allow create, update, delete: if manager();
     }
 
+    // Managers manage all allocations. Regular users may read only their own allocation
+    // and may only confirm that the allocated amount was received.
     match /advanceAllocations/{allocationId} {
-      allow read, create, update, delete: if manager();
+      allow read: if manager()
+        || (enabledUser() && resource.data.ownerEmail == email());
+
+      allow create, delete: if manager();
+
+      allow update: if manager()
+        || (
+          enabledUser()
+          && resource.data.ownerEmail == email()
+          && resource.data.get('allocationReceivedConfirmed', false) == false
+          && request.resource.data.ownerEmail == resource.data.ownerEmail
+          && request.resource.data.get('allocationReceivedConfirmed', false) == true
+          && request.resource.data.get('allocationReceivedBy', '') == email()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'allocationReceivedConfirmed',
+            'allocationReceivedAt',
+            'allocationReceivedBy',
+            'updatedAt',
+            'updatedBy'
+          ])
+        );
     }
 
     // Reminder configuration and reminder history are manager-only.
