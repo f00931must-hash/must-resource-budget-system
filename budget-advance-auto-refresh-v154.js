@@ -1,32 +1,28 @@
-// Budget advance refresh bridge v1.7.2
-// No observers, polling, synthetic plan changes, or repeated Firestore reads.
-// After a successful allocation write closes its dialog, perform one deterministic
-// page reload. The #advance hash is preserved, so the manager returns to the same view.
+// Budget advance startup bridge v1.7.3
+// No observers, polling, synthetic plan changes, or post-save page reloads.
+// The manager advance module already refreshes after successful writes.
+// This file only handles the startup race where #advance is restored before
+// the main app has populated #planSelect.
 
-let allocationSubmitPending=false;
+async function restoreAdvanceWhenPlanReady(){
+  if(location.hash!=="#advance") return;
 
-function installPostSaveReload(){
-  const form=document.getElementById("advanceAllocationForm");
-  const dialog=document.getElementById("advanceAllocationDialog");
-  if(!form||!dialog) return false;
-  if(form.dataset.postSaveReloadInstalled==="1") return true;
-  form.dataset.postSaveReloadInstalled="1";
-
-  form.addEventListener("submit",()=>{ allocationSubmitPending=true; },true);
-  dialog.addEventListener("close",()=>{
-    if(!allocationSubmitPending) return;
-    allocationSubmitPending=false;
-    // In the current manager module, a successful save closes the dialog only after
-    // Firestore write + audit log complete. Reload once to avoid stale in-memory arrays.
-    setTimeout(()=>location.reload(),80);
-  });
-  return true;
+  // Bounded wait only during startup. No permanent observer or polling remains.
+  for(let i=0;i<80;i++){
+    const plan=document.getElementById("planSelect")?.value||"";
+    const tab=document.getElementById("advanceTab");
+    if(plan && tab){
+      // Let the main app finish its current render, then request one fresh advance load.
+      await new Promise(r=>setTimeout(r,80));
+      tab.click();
+      return;
+    }
+    await new Promise(r=>setTimeout(r,50));
+  }
 }
 
-for(let i=0;i<40&&!installPostSaveReload();i++){
-  await new Promise(r=>setTimeout(r,100));
-}
+restoreAdvanceWhenPlanReady().catch(err=>console.warn("advance startup restore failed",err));
 
 // Regular teachers get a separate allocation view with one action:
 // confirm receipt of the allocated amount.
-await import("./budget-my-advance-v170.js?v=1.7.2");
+await import("./budget-my-advance-v170.js?v=1.7.3");
