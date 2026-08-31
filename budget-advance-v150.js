@@ -1,4 +1,4 @@
-// Budget advance / disbursement manager module v1.5.0
+// Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
 // Allocation creation also creates an estimated expenseRecord owned by that teacher.
@@ -21,6 +21,13 @@ function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||nul
 function esc(v){return String(v??"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[m]));}
 function escAttr(v){return esc(v).replace(/'/g,"&#39;");}
 function num(v){return Number(v||0);}
+function fmtTime(v){
+  try{
+    const d=v?.toDate?.() || (v?.seconds?new Date(v.seconds*1000):null);
+    if(!d||Number.isNaN(d.getTime()))return "";
+    return new Intl.DateTimeFormat("zh-TW",{year:"numeric",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).format(d);
+  }catch{return "";}
+}
 function planId(){return $("planSelect")?.value||"";}
 function currentBatch(){return batches.find(x=>x.id===activeBatchId)||null;}
 function recordForAllocation(a){return records.find(r=>r.id===a.expenseRecordId)||null;}
@@ -72,6 +79,9 @@ function installUI(){
   style.textContent=`
     #advance .advance-received{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;background:#edf8f0;color:#216e39;font-weight:700;font-size:12px}
     #advance .advance-not-received{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;background:#fff4e5;color:#9a5b00;font-weight:700;font-size:12px}
+    #advance .allocation-receipt{display:inline-flex;align-items:center;margin-top:7px;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700}
+    #advance .allocation-receipt.confirmed{background:#edf8f0;color:#216e39}
+    #advance .allocation-receipt.pending{background:#fff4e5;color:#9a5b00}
     #advance .advance-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr auto;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #eee}
     #advance .advance-grid:last-child{border-bottom:0}
     #advance .advance-grid small{display:block;color:#777;margin-top:4px}
@@ -359,8 +369,13 @@ function render(){
     const status=!r?'找不到使用紀錄':r.estimated===true?'預估中':isApproved(r)?'已核銷・已鎖定':'已轉實際・待核對';
     const varianceHtml=variance===null?'—':variance===0?'<span class="variance-zero">剛好</span>':variance>0?`<span class="variance-positive">多估 ${money.format(variance)}</span>`:`<span class="variance-negative">少估 ${money.format(Math.abs(variance))}</span>`;
     const canEdit=!!r&&r.estimated===true&&!isApproved(r);
+    const receiptConfirmed=a.allocationReceivedConfirmed===true;
+    const receiptTime=fmtTime(a.allocationReceivedAt);
+    const receiptHtml=receiptConfirmed
+      ? `<span class="allocation-receipt confirmed">✓ 老師已確認收到</span>${receiptTime?`<small>確認時間：${esc(receiptTime)}</small>`:""}`
+      : '<span class="allocation-receipt pending">尚未確認收到</span>';
     return `<div class="advance-grid">
-      <div><strong>${esc(a.purpose||"未填活動")}</strong><small>${esc(a.ownerName||a.ownerEmail||"")}</small></div>
+      <div><strong>${esc(a.purpose||"未填活動")}</strong><small>${esc(a.ownerName||a.ownerEmail||"")}</small>${receiptHtml}</div>
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small></div>
