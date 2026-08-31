@@ -1,4 +1,4 @@
-// Budget advance startup + explicit refresh bridge v1.7.5
+// Budget advance startup + explicit refresh bridge v1.7.6
 // No permanent observers, polling, repeated refreshes, or page reloads.
 // The manager advance module refreshes after its own successful writes.
 // This file only handles:
@@ -44,4 +44,4 @@ restoreAdvanceWhenPlanReady().catch(err=>console.warn("advance startup restore f
 
 // Regular teachers get a separate allocation view with one action:
 // confirm receipt of the allocated amount.
-await import("./budget-my-advance-v170.js?v=1.7.5");
+await import("./budget-my-advance-v170.js?v=1.7.6");
