@@ -1,4 +1,4 @@
-// Teacher own advance allocation view v1.7.0
+// Teacher own advance allocation view v1.7.5
 // Managers keep the existing advance page. Regular users only see their own allocations
 // and can perform one action: confirm receipt of the allocated amount.
 
@@ -9,7 +9,7 @@ import { getFirestore, doc, getDoc, getDocs, updateDoc, collection, query, where
 const PROJECT_ID="must-resource-budget-system";
 const $=id=>document.getElementById(id);
 const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0});
-let auth=null,db=null,currentEmail="",loading=false;
+let auth=null,db=null,currentEmail="",loading=false,receiptBusy=false;
 
 function app(){return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null;}
 function esc(v){return String(v??"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[m]));}
@@ -38,8 +38,8 @@ function installUI(){
   });
 }
 
-async function loadOwn(){
-  if(loading||!db||!currentEmail)return;
+async function loadOwn(force=false){
+  if((loading&&!force)||!db||!currentEmail)return;
   const p=planId(),wrap=$("myAdvanceList");
   if(!wrap)return;
   if(!p){wrap.innerHTML='<div class="empty">請先選擇計畫。</div>';return;}
@@ -70,9 +70,10 @@ async function loadOwn(){
 }
 
 async function confirmReceipt(btn,item){
-  if(!item||item.allocationReceivedConfirmed===true)return;
+  if(receiptBusy||!item||item.allocationReceivedConfirmed===true)return;
   const amount=money.format(Number(item.estimatedAmount||0));
   if(!confirm(`確認你已收到這筆分配金額？\n\n${item.purpose||"此筆分配"}\n金額：${amount}\n\n確認後僅記錄「已收到」，不會進行核銷。`))return;
+  receiptBusy=true;
   btn.disabled=true; const old=btn.textContent; btn.textContent="確認中…";
   try{
     await updateDoc(doc(db,"advanceAllocations",item.id),{
@@ -82,8 +83,10 @@ async function confirmReceipt(btn,item){
       updatedAt:serverTimestamp(),
       updatedBy:currentEmail
     });
-    await loadOwn();
+    loading=false;
+    await loadOwn(true);
   }catch(err){btn.disabled=false;btn.textContent=old;showError(err);}
+  finally{receiptBusy=false;}
 }
 
 function showError(err){console.error(err);alert("我的分配功能發生錯誤："+(err?.message||err));}
