@@ -1,4 +1,4 @@
-// Budget UI state + category counts v1.5.0
+// Budget UI state + category counts v1.6.9
 // 1) Preserve current tab across reload/actions using URL hash.
 // 2) Show record counts in the category filter.
 // 3) Preserve selected category filter per budget plan.
@@ -8,11 +8,11 @@
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
-import "./budget-manager-usability-v136.js?v=1.3.8";
+import "./budget-manager-usability-v136.js?v=1.6.9";
 import "./budget-manager-waiver-fix-v138.js?v=1.3.8";
 
 const PROJECT_ID="must-resource-budget-system";
-const VALID_VIEWS=new Set(["dashboard","records","budget","advance","trash"]);
+const VALID_VIEWS=new Set(["dashboard","records","budget","advance","trash","reminders"]);
 const FILTER_KEY_PREFIX="must-budget-category-filter-v131:";
 let db=null;
 let auth=null;
