@@ -1,4 +1,4 @@
-// Teacher own advance allocation view v1.7.5
+// Teacher own advance allocation view v1.7.6
 // Managers keep the existing advance page. Regular users only see their own allocations
 // and can perform one action: confirm receipt of the allocated amount.
 
@@ -20,14 +20,14 @@ function installUI(){
   const nav=document.querySelector("nav.tabs"),main=document.querySelector("#appView main");
   if(!nav||!main)return;
   const tab=document.createElement("button");
-  tab.id="myAdvanceTab"; tab.className="tab"; tab.dataset.view="myAdvance"; tab.textContent="我的分配";
+  tab.id="myAdvanceTab"; tab.className="tab"; tab.dataset.view="myAdvance"; tab.textContent="預支／動支";
   const trash=nav.querySelector('[data-view="trash"]');
   if(trash)nav.insertBefore(tab,trash);else nav.appendChild(tab);
 
   const section=document.createElement("section");
   section.id="myAdvance"; section.className="view";
   section.innerHTML=`
-    <div class="section-head"><div><h2>我的分配</h2><p>查看管理員分配給你的預支／動支金額。此頁只能確認是否已收到分配金額；實際核銷仍到「使用紀錄」辦理。</p></div></div>
+    <div class="section-head"><div><h2>我的預支／動支分配</h2><p>查看管理員分配給你的預支／動支金額。此頁只能確認是否已收到分配金額；實際核銷仍到「使用紀錄」辦理。</p></div></div>
     <div id="myAdvanceList" class="panel"><div class="empty">讀取中…</div></div>`;
   main.appendChild(section);
 
@@ -89,7 +89,7 @@ async function confirmReceipt(btn,item){
   finally{receiptBusy=false;}
 }
 
-function showError(err){console.error(err);alert("我的分配功能發生錯誤："+(err?.message||err));}
+function showError(err){console.error(err);alert("預支／動支功能發生錯誤："+(err?.message||err));}
 
 async function init(){
   for(let i=0;i<120;i++){
