@@ -1,6 +1,7 @@
-// Advance allocation: teacher-facing estimated -> actual reimbursement helper v1.5.6
+// Advance allocation: teacher-facing estimated -> actual reimbursement helper v1.7.6
 // Patches linked estimated records with a "轉實際核銷" action.
-// Performance: DOM mutations only repatch cached data; Firestore is refreshed only on meaningful events.
+// Performance-safe: DOM patching is idempotent and never removes/re-adds the same
+// button on every MutationObserver callback. Firestore is refreshed only on meaningful events.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -8,7 +9,7 @@ import { getFirestore, collection, getDocs, query, where } from "https://www.gst
 
 const PROJECT_ID="must-resource-budget-system";
 let auth=null,db=null,email="",rows=[];
-let timer=null;
+let timer=null,patchQueued=false;
 function app(){return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null;}
 function money(n){return new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0}).format(Number(n||0));}
 function planId(){return document.getElementById("planSelect")?.value||"";}
@@ -19,12 +20,30 @@ function recordId(card){
 function linked(r){return r?.source==="advance-allocation"||!!r?.advanceAllocationId||r?.advanceLinked===true;}
 function approved(r){return r?.reviewStatus==="approved"||r?.reviewed===true||r?.locked===true;}
 
+function shouldShowConvert(r){
+  return !!r && linked(r) && r.estimated===true && !approved(r)
+    && String(r.ownerEmail||"").toLowerCase()===email;
+}
+
 function patchCards(){
+  patchQueued=false;
   document.querySelectorAll("#recordList .record-card").forEach(card=>{
-    card.querySelectorAll("[data-convert-advance-record]").forEach(x=>x.remove());
-    const id=recordId(card); if(!id)return;
-    const r=rows.find(x=>x.id===id);
-    if(!r||!linked(r)||r.estimated!==true||approved(r)||String(r.ownerEmail||"").toLowerCase()!==email)return;
+    const id=recordId(card);
+    const existing=card.querySelector("[data-convert-advance-record]");
+    const r=id?rows.find(x=>x.id===id):null;
+    const shouldShow=shouldShowConvert(r);
+
+    // IMPORTANT: never remove and immediately recreate the same button.
+    // That behavior triggers this MutationObserver again and can create an infinite DOM loop.
+    if(!shouldShow){
+      if(existing) existing.remove();
+      return;
+    }
+    if(existing){
+      if(existing.dataset.convertAdvanceRecord!==id) existing.dataset.convertAdvanceRecord=id;
+      return;
+    }
+
     const actions=card.querySelector(".record-actions"); if(!actions)return;
     const b=document.createElement("button");
     b.className="link-btn approve";
@@ -33,6 +52,12 @@ function patchCards(){
     b.title="保留原預估金額，改填實際支出並上傳核銷單據";
     actions.insertBefore(b,actions.firstChild);
   });
+}
+
+function queuePatch(){
+  if(patchQueued)return;
+  patchQueued=true;
+  queueMicrotask(patchCards);
 }
 
 function addDialogHint(r){
@@ -97,11 +122,11 @@ const recordDialog=document.getElementById("recordDialog");
 recordDialog?.addEventListener("close",()=>{cleanupDialog();schedule(160);});
 document.getElementById("planSelect")?.addEventListener("change",()=>schedule(180));
 
-// Important: rendering record cards should not trigger another Firestore query.
-// Reuse cached rows and only re-apply the action buttons.
+// Rendering record cards only re-applies cached UI state. No Firestore read here.
+// queuePatch + idempotent patchCards prevents self-triggering DOM loops.
 const recordList=document.getElementById("recordList");
 if(recordList){
-  new MutationObserver(()=>patchCards()).observe(recordList,{childList:true,subtree:true});
+  new MutationObserver(queuePatch).observe(recordList,{childList:true,subtree:true});
 }
 
 window.addEventListener("budget-advance-refresh",()=>schedule(160));
