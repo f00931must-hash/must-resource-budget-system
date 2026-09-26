@@ -59,7 +59,7 @@ async function loadOwn(force=false){
       const b=batches.get(a.batchId)||{};
       const confirmed=a.allocationReceivedConfirmed===true;
       return `<div style="display:grid;grid-template-columns:minmax(220px,1.8fr) 1fr 1fr auto;gap:14px;align-items:center;padding:16px 0;border-bottom:1px solid #eee">
-        <div><strong>${esc(a.purpose||"未填用途")}</strong><small style="display:block;margin-top:5px;color:#777">${esc(b.semester||"未填學期")}｜${esc(b.categoryName||"預支／動支分配")}</small></div>
+        <div><strong>${esc(a.purpose||"未填用途")}</strong><small style="display:block;margin-top:5px;color:#777">${esc(b.semester||"未填學期")}｜${esc(a.categoryName||b.categoryName||"預支／動支分配")}</small></div>
         <div><small style="display:block;color:#777">分配金額</small><strong>${money.format(Number(a.estimatedAmount||0))}</strong></div>
         <div><small style="display:block;color:#777">收款狀態</small><strong>${confirmed?'✅ 已確認收到':'尚未確認'}</strong></div>
         <div>${confirmed?'':`<button class="primary-btn" data-confirm-allocation-receipt="${a.id}">確認收到分配金額</button>`}</div>
