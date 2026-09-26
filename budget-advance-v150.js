@@ -92,8 +92,9 @@ function installUI(){
     .advance-category-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
     .advance-category-option{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #e7def3;border-radius:12px;background:#fff}
     .advance-receipt-history{margin-top:14px;padding-top:12px;border-top:1px solid #eee}
-    .advance-receipt-row{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:8px 0;border-bottom:1px dashed #eee}
+    .advance-receipt-row{display:grid;grid-template-columns:1fr auto auto;gap:4px 12px;align-items:center;padding:8px 0;border-bottom:1px dashed #eee}
     .advance-receipt-row small{grid-column:1/-1;color:#777}
+    .advance-receipt-delete{white-space:nowrap}
     @media(max-width:640px){.advance-category-options{grid-template-columns:1fr}}
     @media(max-width:900px){#advance .advance-grid{grid-template-columns:1fr 1fr}#advance .advance-grid>div:first-child{grid-column:1/-1}}
   `;
@@ -212,6 +213,48 @@ async function saveReceipt(e){
     });
     await addDoc(collection(db,"auditLogs"),{type:"advance-receipt",targetId:b.id,planId:planId(),action:"add",amount,date,actorEmail:currentEmail,createdAt:serverTimestamp()});
     $("advanceReceiptDialog").close();
+    await loadAll();
+  }catch(err){showError(err);}
+}
+
+async function deleteReceipt(receiptId){
+  const b=currentBatch();if(!b)return;
+  const receipts=batchReceipts(b);
+  const target=receipts.find(x=>String(x.id||"")===String(receiptId||""));
+  if(!target)return alert("找不到這筆領款紀錄，請重新整理後再試。");
+  if(!confirm(`確定刪除這筆領款紀錄？\n\n日期：${target.date||"未填日期"}\n金額：${money.format(target.amount||0)}\n\n只會刪除領款紀錄，不會刪除預支批次、活動分配或核銷資料。`))return;
+
+  try{
+    let remain=[];
+    if(Array.isArray(b.receipts)&&b.receipts.length){
+      remain=b.receipts.filter(x=>String(x.id||"")!==String(receiptId||""));
+    }else{
+      // 舊版只有 receivedAmount / receivedDate，刪除後直接清除舊領款狀態。
+      remain=[];
+    }
+    const total=remain.reduce((s,x)=>s+num(x.amount),0);
+    const latest=[...remain].sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))).at(-1)||null;
+
+    await updateDoc(doc(db,"advanceBatches",b.id),{
+      receipts:remain,
+      received:total>0,
+      receivedAmount:total,
+      receivedDate:latest?.date||"",
+      updatedAt:serverTimestamp(),
+      updatedBy:currentEmail
+    });
+    await addDoc(collection(db,"auditLogs"),{
+      type:"advance-receipt",
+      targetId:b.id,
+      planId:planId(),
+      action:"delete",
+      amount:num(target.amount),
+      date:target.date||"",
+      note:target.note||"",
+      legacy:target.legacy===true,
+      actorEmail:currentEmail,
+      createdAt:serverTimestamp()
+    });
     await loadAll();
   }catch(err){showError(err);}
 }
@@ -423,7 +466,7 @@ function render(){
 
   const categoryText=batchCategoryNames(b).join("、")||"—";
   const receiptHtml=receipts.length
-    ? `<div class="advance-receipt-history"><strong>領款紀錄</strong>${receipts.map((x,i)=>`<div class="advance-receipt-row"><span>第 ${i+1} 次｜${esc(x.date||"未填日期")}</span><strong>${money.format(x.amount||0)}</strong>${x.note?`<small>${esc(x.note)}</small>`:""}</div>`).join("")}</div>`
+    ? `<div class="advance-receipt-history"><strong>領款紀錄</strong>${receipts.map((x,i)=>`<div class="advance-receipt-row"><span>第 ${i+1} 次｜${esc(x.date||"未填日期")}${x.legacy?"（舊版）":""}</span><strong>${money.format(x.amount||0)}</strong><button type="button" class="link-btn danger advance-receipt-delete" data-delete-advance-receipt="${escAttr(x.id||"legacy")}">刪除</button>${x.note?`<small>${esc(x.note)}</small>`:""}</div>`).join("")}</div>`
     : '<div class="muted" style="margin-top:12px">尚未新增領款紀錄。</div>';
   $("advanceBatchInfo").innerHTML=`
     <div class="panel-head"><h3>${esc(b.title||"預支批次")}</h3><span class="${received?'advance-received':'advance-not-received'}">${received?`✓ 已領 ${receipts.length} 次`:'尚未領錢'}</span></div>
@@ -435,6 +478,10 @@ function render(){
       <div><small class="muted">尚未分配</small><strong style="display:block">${money.format(unallocated)}</strong></div>
       <div><small class="muted">完成實際核銷活動</small><strong style="display:block">${actualCount} / ${aa.length}</strong></div>
     </div>${receiptHtml}${b.note?`<p class="muted" style="margin:12px 0 0">備註：${esc(b.note)}</p>`:""}`;
+
+  document.querySelectorAll("[data-delete-advance-receipt]").forEach(btn=>{
+    btn.onclick=()=>deleteReceipt(btn.dataset.deleteAdvanceReceipt||"");
+  });
 
   $("advanceAllocationCount").textContent=`${aa.length} 個活動`;
   if(!aa.length){$("advanceAllocationList").innerHTML='<div class="empty">尚未分配活動。</div>';return;}
