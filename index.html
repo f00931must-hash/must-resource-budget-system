@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>資源教室經費管理系統</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=1.6.7" />
-  <link rel="stylesheet" href="./styles.css?v=1.6.7" />
+  <link rel="stylesheet" href="./styles.css?v=1.6.8" />
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </head>
 <body>
@@ -77,6 +77,7 @@
   <dialog id="recordDialog"><form id="recordForm" method="dialog" class="dialog-form">
     <div class="dialog-head"><h3 id="recordDialogTitle">新增使用紀錄</h3><button type="button" class="icon-btn" data-close="recordDialog">×</button></div>
     <input type="hidden" id="recordId" />
+    <label id="recordOwnerWrap" class="manager-only hidden">經費負責老師<select id="recordOwner"></select><small class="hint">管理員代為建立或修改時，可指定此筆經費屬於哪位老師；指定後該老師可修改自己的未鎖定紀錄。</small></label>
     <label>經費項目<select id="recordCategory" required></select></label>
     <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：A4影印紙" /></label>
     <div class="two-cols"><label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label><label>學期<input id="recordSemester" required maxlength="5" pattern="\d{3}-[12]" placeholder="例如：114-2、115-1" /></label></div>
@@ -113,7 +114,7 @@
 
   <div id="toast" class="toast hidden"></div>
   <script type="module" src="./budget-private-assets-v123.js?v=1.6.7"></script>
-  <script type="module" src="./app-v165-loader.js?v=1.6.7"></script>
+  <script type="module" src="./app-v165-loader.js?v=1.6.8"></script>
   <script type="module" src="./budget-attachment-delete-v126.js?v=1.6.7"></script>
   <script type="module" src="./budget-batch-category-v127.js?v=1.6.7"></script>
   <script type="module" src="./budget-trash-v128.js?v=1.6.7"></script>
