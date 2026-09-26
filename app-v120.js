@@ -552,6 +552,12 @@ async function verifyBudgetManagerForExport(){
     return snap.exists()&&snap.data().enabled===true&&snap.data().role==="manager";
   }catch{return false;}
 }
+function budgetUserName(email,fallback=""){
+  const key=String(email||"").trim().toLowerCase();
+  if(!key)return String(fallback||"").trim();
+  const user=(state.budgetUsers||[]).find(u=>String(u.email||"").trim().toLowerCase()===key);
+  return String(user?.name||user?.displayName||fallback||key.split("@")[0]).trim();
+}
 function downloadBudgetBlob(blob,fileName){
   const url=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
@@ -583,23 +589,26 @@ async function downloadBudgetExcel(){
     wb.modified=new Date();
 
     const ws=wb.addWorksheet("經費總表",{views:[{showGridLines:false,state:"frozen",ySplit:4}]});
-    ws.columns=[28,16,16,16,16,16,16,16,18].map(width=>({width}));
+    ws.columns=[22,18,18,16,16,16,16,18,18].map(width=>({width}));
     budgetExcelMergeTitle(ws,"A1:I2","明新科技大學資源教室｜經費編列與使用總表","FF243B53",18);
     ws.mergeCells("A3:H3");
     ws.getCell("A3").value=`${plan.year||""}${plan.term?`｜${plan.term}`:""}｜${plan.name||""}`;
     budgetExcelStyleCell(ws.getCell("A3"),{fill:"FFF4F6F8",fontColor:"FF667085",bold:true,align:"left"});
+    ws.getRow(3).height=Math.max(26,Math.min(58,22+Math.ceil(String(plan.name||"").length/32)*14));
     budgetExcelLink(ws.getCell("I3"),"→ 使用紀錄明細","#'使用紀錄明細'!A1");
 
     budgetExcelMergeTitle(ws,"A5:I5","一、計畫概況","FF4E79A7",13);
     ws.addRows([
-      ["計畫名稱",plan.name||"","年度",plan.year||"","期別",plan.term||"","狀態",plan.active===false?"停用":"啟用"],
-      ["匯出日期",new Date(),"","","","","",""]
+      ["計畫名稱",plan.name||"","","","","","","",""],
+      ["年度",plan.year||"","期別",plan.term||"","狀態",plan.active===false?"停用":"啟用","匯出日期",new Date(),""]
     ]);
-    ws.mergeCells("B6:C6");ws.mergeCells("D6:E6");ws.mergeCells("F6:G6");ws.mergeCells("H6:I6");
-    ws.mergeCells("B7:C7");ws.mergeCells("D7:I7");
-    ["A6","D6","F6","H6","A7"].forEach(a=>budgetExcelStyleCell(ws.getCell(a),{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true}));
-    ["B6","D6","F6","H6","B7"].forEach(a=>budgetExcelStyleCell(ws.getCell(a)));
-    ws.getCell("B7").numFmt="yyyy-mm-dd hh:mm";
+    ws.mergeCells("B6:I6");
+    ws.mergeCells("B7:C7");ws.mergeCells("D7:E7");ws.mergeCells("F7:G7");ws.mergeCells("H7:I7");
+    ["A6","A7","D7","F7","H7"].forEach(a=>budgetExcelStyleCell(ws.getCell(a),{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true}));
+    ["B6","B7","D7","F7","H7"].forEach(a=>budgetExcelStyleCell(ws.getCell(a)));
+    ws.getRow(6).height=Math.max(34,Math.min(74,24+Math.ceil(String(plan.name||"").length/34)*16));
+    ws.getCell("B6").alignment={vertical:"middle",horizontal:"left",wrapText:true};
+    ws.getCell("H7").numFmt="yyyy-mm-dd hh:mm";
 
     budgetExcelMergeTitle(ws,"A9:I9","二、整體經費進度","FF3A7D6B",13);
     [
@@ -663,7 +672,7 @@ async function downloadBudgetExcel(){
     ws.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};
 
     const detail=wb.addWorksheet("使用紀錄明細",{views:[{showGridLines:false,state:"frozen",ySplit:4}]});
-    const widths=[24,12,38,25,15,14,14,14,32,24,22,22];
+    const widths=[24,12,38,18,15,14,14,14,32,18,22,22];
     detail.columns=widths.map(width=>({width}));
     budgetExcelMergeTitle(detail,"A1:L2","使用紀錄明細","FF243B53",17);
     budgetExcelLink(detail.getCell("A3"),"← 回到經費總表","#'經費總表'!A1");
@@ -688,10 +697,10 @@ async function downloadBudgetExcel(){
       hr.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true,align:"center"}));
       currentRow++;
       cr.forEach(r=>{
-        const owner=[r.ownerName||"",r.ownerEmail||""].filter(Boolean).join("\n");
+        const owner=r.ownerName||budgetUserName(r.ownerEmail,"");
         const voucher=(r.voucherUrl||r.folderUrl)?"有":"無";
         const confirmed=r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true||r.amountConfirmedByManagerWaiver===true?"已確認":"未確認");
-        const created=excelDateTime(r.createdAt),updated=excelDateTime(r.updatedAt);
+        const created=excelDateTime(r.createdAt),updated=excelDateTime(r.updatedAt),createdBy=budgetUserName(r.createdBy,""),updatedBy=budgetUserName(r.updatedBy,"");
         const row=detail.getRow(currentRow);
         row.values=[
           cat.name||r.categoryName||"未分類",
@@ -703,9 +712,9 @@ async function downloadBudgetExcel(){
           voucher,
           confirmed,
           r.note||"",
-          r.createdBy||"",
+          createdBy,
           created,
-          [r.updatedBy||"",updated instanceof Date?updated.toLocaleString("zh-TW",{hour12:false}):""].filter(Boolean).join("\n")
+          [updatedBy,updated instanceof Date?updated.toLocaleString("zh-TW",{hour12:false}):""].filter(Boolean).join("\n")
         ];
         row.eachCell((cell,col)=>{
           budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"});
@@ -735,7 +744,7 @@ async function downloadBudgetExcel(){
       currentRow++;
       other.forEach(r=>{
         const row=detail.getRow(currentRow++);
-        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",[r.ownerName||"",r.ownerEmail||""].filter(Boolean).join("\n"),Number(r.amount||0),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",r.createdBy||"",excelDateTime(r.createdAt),r.updatedBy||""];
+        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",r.ownerName||budgetUserName(r.ownerEmail,""),Number(r.amount||0),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,"")];
         row.eachCell((cell,col)=>budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"}));
         budgetExcelMoney(row.getCell(5));
         if(row.getCell(11).value instanceof Date)row.getCell(11).numFmt="yyyy-mm-dd hh:mm";
