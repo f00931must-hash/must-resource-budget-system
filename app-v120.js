@@ -499,9 +499,9 @@ async function unlockRecord(id){
 function excelDateTime(v){
   if(!v)return "";
   try{
-    if(typeof v.toDate==="function")return v.toDate().toLocaleString("zh-TW",{hour12:false});
-    if(typeof v.seconds==="number")return new Date(v.seconds*1000).toLocaleString("zh-TW",{hour12:false});
-    const d=new Date(v);return Number.isNaN(d.getTime())?"":d.toLocaleString("zh-TW",{hour12:false});
+    if(typeof v.toDate==="function")return v.toDate();
+    if(typeof v.seconds==="number")return new Date(v.seconds*1000);
+    const d=new Date(v);return Number.isNaN(d.getTime())?"":d;
   }catch{return "";}
 }
 function recordStageText(r){
@@ -512,101 +512,252 @@ function recordStageText(r){
 function amountByStage(rows,stage){
   return rows.filter(r=>recordStageText(r)===stage).reduce((s,r)=>s+Number(r.amount||0),0);
 }
-function downloadBudgetExcel(){
-  if(!isManager())return toast("此功能僅限經費管理員使用");
+function budgetExcelStyleCell(cell,{fill,fontColor="FF243B53",bold=false,size=11,align="left",border=true}={}){
+  cell.font={name:"Microsoft JhengHei",color:{argb:fontColor},bold,size};
+  cell.alignment={vertical:"middle",horizontal:align,wrapText:true};
+  if(fill)cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:fill}};
+  if(border)cell.border={
+    top:{style:"thin",color:{argb:"FFD6DEE8"}},
+    left:{style:"thin",color:{argb:"FFD6DEE8"}},
+    bottom:{style:"thin",color:{argb:"FFD6DEE8"}},
+    right:{style:"thin",color:{argb:"FFD6DEE8"}}
+  };
+}
+function budgetExcelMergeTitle(ws,range,text,fill="FF243B53",size=14){
+  ws.mergeCells(range);
+  const cell=ws.getCell(range.split(":")[0]);
+  cell.value=text;
+  budgetExcelStyleCell(cell,{fill,fontColor:"FFFFFFFF",bold:true,size,align:"center"});
+}
+function budgetExcelMoney(cell){
+  cell.numFmt='"$"#,##0;[Red]-"$"#,##0';
+  cell.alignment={vertical:"middle",horizontal:"right",wrapText:true};
+}
+function budgetExcelLink(cell,text,hyperlink){
+  cell.value={text,hyperlink};
+  cell.font={name:"Microsoft JhengHei",color:{argb:"FF2563EB"},bold:true,underline:true,size:11};
+  cell.alignment={vertical:"middle",horizontal:"left",wrapText:true};
+  cell.border={
+    top:{style:"thin",color:{argb:"FFD6DEE8"}},
+    left:{style:"thin",color:{argb:"FFD6DEE8"}},
+    bottom:{style:"thin",color:{argb:"FFD6DEE8"}},
+    right:{style:"thin",color:{argb:"FFD6DEE8"}}
+  };
+}
+async function verifyBudgetManagerForExport(){
+  const email=String(state.user?.email||"").toLowerCase();
+  if(!email)return false;
+  try{
+    const snap=await getDoc(doc(db,"users",email));
+    return snap.exists()&&snap.data().enabled===true&&snap.data().role==="manager";
+  }catch{return false;}
+}
+function downloadBudgetBlob(blob,fileName){
+  const url=URL.createObjectURL(blob),a=document.createElement("a");
+  a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+async function downloadBudgetExcel(){
+  if(!isManager()||!(await verifyBudgetManagerForExport()))return toast("此功能僅限經費管理員使用",5000);
   if(!state.activePlanId)return toast("請先選擇計畫");
-  if(!window.XLSX)return toast("Excel 元件尚未載入，請重新整理後再試",5000);
+  if(!window.ExcelJS)return toast("Excel 元件尚未載入，請重新整理後再試",5000);
 
-  const plan=currentPlan()||{};
-  const rows=[...state.records];
-  const total=planTotal();
-  const allocated=allocatedTotal();
-  const approved=amountByStage(rows,"已核銷");
-  const pending=amountByStage(rows,"待核對");
-  const estimated=amountByStage(rows,"預估");
-  const purchasing=amountByStage(rows,"請購中");
-  const reserved=rows.reduce((s,r)=>s+Number(r.amount||0),0);
-  const remain=total-reserved;
+  const btn=$("downloadBudgetExcelBtn");
+  const old=btn?.textContent||"下載 Excel";
+  if(btn){btn.disabled=true;btn.textContent="製作中…";}
 
-  const overview=[
-    ["欄位","內容"],
-    ["計畫名稱",plan.name||""],
-    ["年度",plan.year||""],
-    ["期別",plan.term||""],
-    ["計畫狀態",plan.active===false?"停用":"啟用"],
-    ["計畫總核定額度",total],
-    ["已編列額度",allocated],
-    ["尚未編列",total-allocated],
-    ["已核銷",approved],
-    ["待核對",pending],
-    ["預估",estimated],
-    ["請購中",purchasing],
-    ["目前總占用",reserved],
-    ["計畫剩餘額度",remain],
-    ["匯出時間",new Date().toLocaleString("zh-TW",{hour12:false})]
-  ];
+  try{
+    const plan=currentPlan()||{};
+    const rows=state.records.filter(r=>r.deleted!==true);
+    const categories=state.categories.filter(c=>c.deleted!==true);
+    const total=planTotal(),allocated=allocatedTotal();
+    const approved=amountByStage(rows,"已核銷");
+    const pending=amountByStage(rows,"待核對");
+    const estimated=amountByStage(rows,"預估");
+    const purchasing=amountByStage(rows,"請購中");
+    const reserved=rows.reduce((s,r)=>s+Number(r.amount||0),0);
+    const remain=total-reserved;
+    const wb=new ExcelJS.Workbook();
+    wb.creator="明新科技大學資源教室";
+    wb.created=new Date();
+    wb.modified=new Date();
 
-  const categoryRows=[["經費科目","狀態","編列額度","預估","請購中","待核對","已核銷","總占用","剩餘額度"]];
-  state.categories.forEach(cat=>{
-    const cr=rows.filter(r=>r.categoryId===cat.id);
-    const budget=Number(cat.budget||0);
-    const e=amountByStage(cr,"預估"),p=amountByStage(cr,"請購中"),w=amountByStage(cr,"待核對"),a=amountByStage(cr,"已核銷");
-    const used=cr.reduce((s,r)=>s+Number(r.amount||0),0);
-    categoryRows.push([cat.name||"",cat.active===false?"停用":"啟用",budget,e,p,w,a,used,budget-used]);
-  });
+    const ws=wb.addWorksheet("經費總表",{views:[{showGridLines:false,state:"frozen",ySplit:4}]});
+    ws.columns=[28,16,16,16,16,16,16,16,18].map(width=>({width}));
+    budgetExcelMergeTitle(ws,"A1:I2","明新科技大學資源教室｜經費編列與使用總表","FF243B53",18);
+    ws.mergeCells("A3:H3");
+    ws.getCell("A3").value=`${plan.year||""}${plan.term?`｜${plan.term}`:""}｜${plan.name||""}`;
+    budgetExcelStyleCell(ws.getCell("A3"),{fill:"FFF4F6F8",fontColor:"FF667085",bold:true,align:"left"});
+    budgetExcelLink(ws.getCell("I3"),"→ 使用紀錄明細","#'使用紀錄明細'!A1");
 
-  const detailRows=[["學期","經費科目","用途／摘要","負責老師","負責老師 Email","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新者","最後更新時間","紀錄 ID"]];
-  rows
-    .slice()
-    .sort((a,b)=>String(b.semester||"").localeCompare(String(a.semester||""),undefined,{numeric:true})||tsMillis(b.updatedAt||b.createdAt)-tsMillis(a.updatedAt||a.createdAt))
-    .forEach(r=>{
-      const cat=state.categories.find(c=>c.id===r.categoryId);
-      const voucher=(r.voucherUrl||r.folderUrl)?"有":"無";
-      const confirmed=r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true||r.amountConfirmedByManagerWaiver===true?"已確認":"未確認");
-      detailRows.push([
-        r.semester||"",
-        cat?.name||r.categoryName||"未分類",
-        r.purpose||"",
-        r.ownerName||"",
-        r.ownerEmail||"",
-        Number(r.amount||0),
-        recordStageText(r),
-        voucher,
-        confirmed,
-        r.note||"",
-        r.createdBy||"",
-        excelDateTime(r.createdAt),
-        r.updatedBy||"",
-        excelDateTime(r.updatedAt),
-        r.id||""
-      ]);
+    budgetExcelMergeTitle(ws,"A5:I5","一、計畫概況","FF4E79A7",13);
+    ws.addRows([
+      ["計畫名稱",plan.name||"","年度",plan.year||"","期別",plan.term||"","狀態",plan.active===false?"停用":"啟用"],
+      ["匯出日期",new Date(),"","","","","",""]
+    ]);
+    ws.mergeCells("B6:C6");ws.mergeCells("D6:E6");ws.mergeCells("F6:G6");ws.mergeCells("H6:I6");
+    ws.mergeCells("B7:C7");ws.mergeCells("D7:I7");
+    ["A6","D6","F6","H6","A7"].forEach(a=>budgetExcelStyleCell(ws.getCell(a),{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true}));
+    ["B6","D6","F6","H6","B7"].forEach(a=>budgetExcelStyleCell(ws.getCell(a)));
+    ws.getCell("B7").numFmt="yyyy-mm-dd hh:mm";
+
+    budgetExcelMergeTitle(ws,"A9:I9","二、整體經費進度","FF3A7D6B",13);
+    [
+      ["A10:B12","計畫總額",total,"FF4E79A7","FFFFFFFF"],
+      ["C10:D12","目前總占用",reserved,"FFFFF3D6","FFC8811A"],
+      ["E10:F12","已核銷",approved,"FFE8F5EF","FF3A7D6B"],
+      ["G10:I12","計畫剩餘",remain,"FFF1EAF8","FF7A5195"]
+    ].forEach(([range,label,value,fill,font])=>{
+      ws.mergeCells(range);
+      const cell=ws.getCell(range.split(":")[0]);
+      cell.value=`${label}\n${Number(value||0).toLocaleString("zh-TW")} 元`;
+      budgetExcelStyleCell(cell,{fill,fontColor:font,bold:true,size:15,align:"center"});
     });
 
-  const semesters=[...new Set(rows.map(r=>String(r.semester||"").trim()).filter(Boolean))].sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
-  const semesterRows=[["學期","預估","請購中","待核對","已核銷","合計"]];
-  semesters.forEach(term=>{
-    const sr=rows.filter(r=>String(r.semester||"")===term);
-    const e=amountByStage(sr,"預估"),p=amountByStage(sr,"請購中"),w=amountByStage(sr,"待核對"),a=amountByStage(sr,"已核銷");
-    semesterRows.push([term,e,p,w,a,e+p+w+a]);
-  });
+    budgetExcelMergeTitle(ws,"A14:I14","三、經費編列與使用狀況","FF7A5195",13);
+    const catHeader=ws.addRow(["經費科目","編列額度","預估","請購中","待核對","已核銷","總占用","剩餘額度","使用率"]);
+    catHeader.height=28;
+    catHeader.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFF1EAF8",fontColor:"FF7A5195",bold:true,align:"center"}));
 
-  const wb=XLSX.utils.book_new();
-  const sheets=[
-    ["計畫總覽",overview,[22,28]],
-    ["經費編列",categoryRows,[24,10,14,14,14,14,14,14,14]],
-    ["使用紀錄明細",detailRows,[12,24,34,16,28,14,12,12,12,28,24,20,24,20,24]],
-    ["學期彙總",semesterRows,[12,14,14,14,14,14]]
-  ];
-  sheets.forEach(([name,data,widths])=>{
-    const ws=XLSX.utils.aoa_to_sheet(data);
-    ws["!cols"]=widths.map(w=>({wch:w}));
-    ws["!freeze"]={xSplit:0,ySplit:1};
-    XLSX.utils.book_append_sheet(wb,ws,name);
-  });
+    const categoryStartRows=new Map();
+    categories.forEach(cat=>{
+      const cr=rows.filter(r=>r.categoryId===cat.id);
+      const budget=Number(cat.budget||0);
+      const e=amountByStage(cr,"預估"),p=amountByStage(cr,"請購中"),w=amountByStage(cr,"待核對"),a=amountByStage(cr,"已核銷");
+      const used=cr.reduce((s,r)=>s+Number(r.amount||0),0),left=budget-used,rate=budget>0?used/budget:0;
+      const row=ws.addRow(["",budget,e,p,w,a,used,left,rate]);
+      categoryStartRows.set(cat.id,row.number);
+      budgetExcelLink(row.getCell(1),`${cat.name||"未命名科目"}${cat.active===false?"（停用）":""}`,"#'使用紀錄明細'!A1");
+      for(let col=2;col<=9;col++){
+        budgetExcelStyleCell(row.getCell(col),{align:col===9?"center":"right"});
+        if(col<=8)budgetExcelMoney(row.getCell(col));
+      }
+      row.getCell(9).numFmt="0.0%";
+      if(left<0)row.getCell(8).font={name:"Microsoft JhengHei",color:{argb:"FFB42318"},bold:true,size:11};
+      row.height=26;
+    });
 
-  const safe=String(plan.name||"經費報表").replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
-  const date=new Date().toISOString().slice(0,10);
-  XLSX.writeFile(wb,`${safe}_${date}.xlsx`);
+    const afterCats=ws.lastRow.number+2;
+    budgetExcelMergeTitle(ws,`A${afterCats}:I${afterCats}`,"四、學期使用狀況","FFB54A4A",13);
+    const semHeader=ws.addRow(["學期","預估","請購中","待核對","已核銷","合計","","",""]);
+    semHeader.eachCell((cell,col)=>{if(col<=6)budgetExcelStyleCell(cell,{fill:"FFFCE8E6",fontColor:"FFB54A4A",bold:true,align:"center"});});
+    ws.mergeCells(`F${semHeader.number}:I${semHeader.number}`);
+    const semesters=[...new Set(rows.map(r=>String(r.semester||"").trim()).filter(Boolean))].sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
+    if(semesters.length){
+      semesters.forEach(term=>{
+        const sr=rows.filter(r=>String(r.semester||"")===term);
+        const e=amountByStage(sr,"預估"),p=amountByStage(sr,"請購中"),w=amountByStage(sr,"待核對"),a=amountByStage(sr,"已核銷");
+        const row=ws.addRow([term,e,p,w,a,e+p+w+a,"","",""]);
+        for(let col=1;col<=6;col++){
+          budgetExcelStyleCell(row.getCell(col),{align:col===1?"center":"right"});
+          if(col>1)budgetExcelMoney(row.getCell(col));
+        }
+        ws.mergeCells(`F${row.number}:I${row.number}`);
+      });
+    }
+
+    const statusRow=ws.lastRow.number+2;
+    ws.mergeCells(`A${statusRow}:I${statusRow+1}`);
+    ws.getCell(`A${statusRow}`).value=`狀態摘要：預估 ${estimated.toLocaleString("zh-TW")} 元｜請購中 ${purchasing.toLocaleString("zh-TW")} 元｜待核對 ${pending.toLocaleString("zh-TW")} 元｜已核銷 ${approved.toLocaleString("zh-TW")} 元｜尚未編列 ${(total-allocated).toLocaleString("zh-TW")} 元`;
+    budgetExcelStyleCell(ws.getCell(`A${statusRow}`),{fill:"FFF4F6F8",fontColor:"FF667085",bold:true,align:"center"});
+    ws.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};
+
+    const detail=wb.addWorksheet("使用紀錄明細",{views:[{showGridLines:false,state:"frozen",ySplit:4}]});
+    const widths=[24,12,38,25,15,14,14,14,32,24,22,22];
+    detail.columns=widths.map(width=>({width}));
+    budgetExcelMergeTitle(detail,"A1:L2","使用紀錄明細","FF243B53",17);
+    budgetExcelLink(detail.getCell("A3"),"← 回到經費總表","#'經費總表'!A1");
+    detail.mergeCells("B3:L3");
+    detail.getCell("B3").value="依經費科目分區；總表中的科目名稱可直接跳到此處。";
+    budgetExcelStyleCell(detail.getCell("B3"),{fill:"FFF4F6F8",fontColor:"FF667085"});
+
+    const categoryDetailRows=new Map();
+    let currentRow=5;
+    categories.forEach(cat=>{
+      const cr=rows.filter(r=>r.categoryId===cat.id)
+        .sort((a,b)=>String(b.semester||"").localeCompare(String(a.semester||""),undefined,{numeric:true})||tsMillis(b.updatedAt||b.createdAt)-tsMillis(a.updatedAt||a.createdAt));
+      if(!cr.length)return;
+      const budget=Number(cat.budget||0),used=cr.reduce((s,r)=>s+Number(r.amount||0),0);
+      detail.mergeCells(`A${currentRow}:L${currentRow}`);
+      detail.getCell(`A${currentRow}`).value=`${cat.name||"未命名科目"}｜編列 ${budget.toLocaleString("zh-TW")} 元｜目前占用 ${used.toLocaleString("zh-TW")} 元｜剩餘 ${(budget-used).toLocaleString("zh-TW")} 元`;
+      budgetExcelStyleCell(detail.getCell(`A${currentRow}`),{fill:"FF4E79A7",fontColor:"FFFFFFFF",bold:true,size:12});
+      categoryDetailRows.set(cat.id,currentRow);
+      currentRow++;
+      const headers=["經費科目","學期","用途／摘要","負責老師","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新"];
+      const hr=detail.getRow(currentRow);hr.values=headers;hr.height=28;
+      hr.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true,align:"center"}));
+      currentRow++;
+      cr.forEach(r=>{
+        const owner=[r.ownerName||"",r.ownerEmail||""].filter(Boolean).join("\n");
+        const voucher=(r.voucherUrl||r.folderUrl)?"有":"無";
+        const confirmed=r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true||r.amountConfirmedByManagerWaiver===true?"已確認":"未確認");
+        const created=excelDateTime(r.createdAt),updated=excelDateTime(r.updatedAt);
+        const row=detail.getRow(currentRow);
+        row.values=[
+          cat.name||r.categoryName||"未分類",
+          r.semester||"",
+          r.purpose||"",
+          owner,
+          Number(r.amount||0),
+          recordStageText(r),
+          voucher,
+          confirmed,
+          r.note||"",
+          r.createdBy||"",
+          created,
+          [r.updatedBy||"",updated instanceof Date?updated.toLocaleString("zh-TW",{hour12:false}):""].filter(Boolean).join("\n")
+        ];
+        row.eachCell((cell,col)=>{
+          budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"});
+          if(col===5)budgetExcelMoney(cell);
+          if(col===11&&cell.value instanceof Date)cell.numFmt="yyyy-mm-dd hh:mm";
+        });
+        const stage=recordStageText(r),stageCell=row.getCell(6);
+        const palette=stage==="已核銷"?["FFE8F5EF","FF3A7D6B"]:stage==="待核對"?["FFFFF3D6","FFC8811A"]:stage==="請購中"?["FFF1EAF8","FF7A5195"]:["FFEAF2F8","FF486F9C"];
+        stageCell.fill={type:"pattern",pattern:"solid",fgColor:{argb:palette[0]}};
+        stageCell.font={name:"Microsoft JhengHei",color:{argb:palette[1]},bold:true,size:11};
+        row.height=Math.max(26,Math.min(72,(String(r.purpose||"").length>30||String(r.note||"").length>35)?48:26));
+        currentRow++;
+      });
+      currentRow++;
+    });
+
+    const knownIds=new Set(categories.map(c=>c.id));
+    const other=rows.filter(r=>!knownIds.has(r.categoryId));
+    if(other.length){
+      detail.mergeCells(`A${currentRow}:L${currentRow}`);
+      detail.getCell(`A${currentRow}`).value="未分類／舊版資料";
+      budgetExcelStyleCell(detail.getCell(`A${currentRow}`),{fill:"FFB54A4A",fontColor:"FFFFFFFF",bold:true,size:12});
+      currentRow++;
+      const headers=["經費科目","學期","用途／摘要","負責老師","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新"];
+      const hr=detail.getRow(currentRow);hr.values=headers;
+      hr.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFFCE8E6",fontColor:"FFB54A4A",bold:true,align:"center"}));
+      currentRow++;
+      other.forEach(r=>{
+        const row=detail.getRow(currentRow++);
+        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",[r.ownerName||"",r.ownerEmail||""].filter(Boolean).join("\n"),Number(r.amount||0),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",r.createdBy||"",excelDateTime(r.createdAt),r.updatedBy||""];
+        row.eachCell((cell,col)=>budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"}));
+        budgetExcelMoney(row.getCell(5));
+        if(row.getCell(11).value instanceof Date)row.getCell(11).numFmt="yyyy-mm-dd hh:mm";
+      });
+    }
+
+    categories.forEach(cat=>{
+      const summaryRow=categoryStartRows.get(cat.id),detailRow=categoryDetailRows.get(cat.id);
+      if(summaryRow&&detailRow)budgetExcelLink(ws.getCell(`A${summaryRow}`),`${cat.name||"未命名科目"}${cat.active===false?"（停用）":""}`,`#'使用紀錄明細'!A${detailRow}`);
+    });
+    detail.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};
+
+    const buffer=await wb.xlsx.writeBuffer();
+    const safe=String(plan.name||"經費報表").replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
+    downloadBudgetBlob(new Blob([buffer],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),`${safe}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    toast("Excel 報表已下載");
+  }catch(error){
+    console.error(error);
+    toast(`Excel 匯出失敗：${error?.message||"請稍後再試"}`,5000);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=old;}
+  }
 }
 
 async function batchDownloadVouchers(){
