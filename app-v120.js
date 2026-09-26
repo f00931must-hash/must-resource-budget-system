@@ -19,7 +19,7 @@ provider.setCustomParameters({ prompt: "select_account" });
 
 const UPLOAD_SERVICE_URL = "https://must-free-upload-service.f00931-must.workers.dev";
 const $ = id => document.getElementById(id);
-const state = { user:null, profile:null, plans:[], activePlanId:"", categories:[], records:[] };
+const state = { user:null, profile:null, plans:[], activePlanId:"", categories:[], records:[], budgetUsers:[] };
 const money = new Intl.NumberFormat("zh-TW", { style:"currency", currency:"TWD", maximumFractionDigits:0 });
 
 $("loginBtn").addEventListener("click", async()=>{
@@ -62,6 +62,7 @@ onAuthStateChanged(auth, async user=>{
       return;
     }
     state.profile=snap.data();
+    if(state.profile?.role==="manager") await loadBudgetUsers();
     $("userName").textContent=state.profile.name||user.displayName||user.email;
     $("userEmail").textContent=user.email;
     $("roleBadge").textContent=isManager()?"經費管理員":"經費使用者";
@@ -79,6 +80,39 @@ onAuthStateChanged(auth, async user=>{
 });
 
 function isManager(){ return state.profile?.role === "manager"; }
+async function loadBudgetUsers(){
+  if(!isManager()){ state.budgetUsers=[]; return; }
+  const snap=await getDocs(collection(db,"users"));
+  state.budgetUsers=snap.docs.map(d=>({email:String(d.id||"").toLowerCase(),...d.data()}))
+    .filter(u=>u.enabled===true&&u.role!=="assistant")
+    .sort((a,b)=>String(a.name||a.email).localeCompare(String(b.name||b.email),"zh-Hant"));
+}
+function renderRecordOwnerOptions(selectedEmail=""){
+  const wrap=$("recordOwnerWrap"),select=$("recordOwner");
+  if(!wrap||!select)return;
+  wrap.classList.toggle("hidden",!isManager());
+  if(!isManager())return;
+  const current=String(selectedEmail||state.user?.email||"").toLowerCase();
+  const users=[...state.budgetUsers];
+  const selfEmail=String(state.user?.email||"").toLowerCase();
+  if(selfEmail&&!users.some(u=>u.email===selfEmail)){
+    users.push({email:selfEmail,name:state.profile?.name||state.user?.displayName||selfEmail});
+  }
+  select.innerHTML=users.map(u=>`<option value="${escAttr(u.email)}">${esc(u.name||u.displayName||u.email)}</option>`).join("");
+  if(users.some(u=>u.email===current))select.value=current;
+  else if(users.length)select.value=users[0].email;
+}
+function selectedRecordOwner(existing=null){
+  if(!isManager()){
+    return {
+      email:existing?.ownerEmail||String(state.user?.email||"").toLowerCase(),
+      name:existing?.ownerName||state.profile?.name||state.user?.displayName||state.user?.email||""
+    };
+  }
+  const email=String($("recordOwner")?.value||existing?.ownerEmail||state.user?.email||"").toLowerCase();
+  const u=state.budgetUsers.find(x=>x.email===email);
+  return {email,name:u?.name||u?.displayName||existing?.ownerName||email};
+}
 function currentPlan(){ return state.plans.find(p=>p.id===state.activePlanId); }
 function isPlanActive(){ return currentPlan()?.active !== false; }
 function planTotal(){ return Number(currentPlan()?.totalBudget||0); }
@@ -322,13 +356,14 @@ function openNewRecord(){
   if(!isPlanActive())return toast("此計畫已停用，無法新增使用紀錄");
   if(!state.categories.some(c=>c.active!==false))return toast("此計畫尚未建立可使用的經費項目");
   $("recordForm").reset(); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄";
+  renderRecordOwnerOptions(state.user.email.toLowerCase());
   $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; updateRecordRequirements(); $("recordDialog").showModal();
 }
 function openEditRecord(id){
   const r=state.records.find(x=>x.id===id); if(!r)return;
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager() && r.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
-  $("recordForm").reset(); $("recordId").value=id; $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
+  $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
   $("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
   $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
@@ -381,6 +416,7 @@ async function saveRecord(e){
   if(existing&&isApproved(existing))return toast("此筆已核銷並鎖定，請先解鎖");
   if(existing&&!isManager()&&existing.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
   const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;
+  const recordOwner=selectedRecordOwner(existing);
   const cat=state.categories.find(c=>c.id===categoryId); if(!cat)return toast("請選擇經費項目");
   if(!/^\d{3}-[12]$/.test(semester))return toast("學期請輸入例如 114-2、115-1");
   const other=state.records.filter(r=>r.categoryId===categoryId&&r.id!==id).reduce((s,r)=>s+Number(r.amount||0),0);
@@ -398,10 +434,18 @@ async function saveRecord(e){
     const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,
       archived:estimated?false:$("recordArchived").checked,amountConfirmed:estimated?false:$("recordAmountConfirm").checked,
       reviewStatus:estimated?"estimated":"pending",reviewed:false,locked:false,note:$("recordNote").value.trim(),
-      ownerEmail:existing?.ownerEmail||state.user.email.toLowerCase(),ownerName:existing?.ownerName||state.profile.name||state.user.displayName||state.user.email,
+      ownerEmail:recordOwner.email,ownerName:recordOwner.name,
       createdBy:existing?.createdBy||state.user.email.toLowerCase(),updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()};
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(id)await updateDoc(doc(db,"expenseRecords",id),data); else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
+    if(isManager()&&existing&&String(existing.ownerEmail||"").toLowerCase()!==recordOwner.email){
+      await addDoc(collection(db,"auditLogs"),{
+        type:"expense-owner",targetId:id,planId:state.activePlanId,action:"change-owner",
+        before:{ownerEmail:existing.ownerEmail||"",ownerName:existing.ownerName||""},
+        after:{ownerEmail:recordOwner.email,ownerName:recordOwner.name},
+        actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()
+      });
+    }
     if(file&&oldPath&&oldPath!==uploaded.path)await githubDeleteFile(oldPath,existing?.voucherFileName||"voucher").catch(()=>{});
     $("recordDialog").close(); await loadPlanData(); renderAll(); toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");
   }catch(err){
