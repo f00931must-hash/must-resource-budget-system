@@ -65,6 +65,7 @@ function installUI(){
     <div class="panel" style="margin-bottom:16px;display:flex;gap:12px;align-items:end;flex-wrap:wrap">
       <label style="min-width:280px;flex:1">目前預支批次<select id="advanceBatchSelect"><option value="">尚未建立預支批次</option></select></label>
       <button id="editAdvanceBatchBtn" class="ghost-btn" disabled>調整批次</button>
+      <button id="addAdvanceReceiptBtn" class="ghost-btn" disabled>＋ 新增領款</button>
       <button id="newAdvanceAllocationBtn" class="primary-btn" disabled>＋ 分配活動</button>
     </div>
     <div id="advanceSummary" class="summary-grid"></div>
@@ -88,6 +89,12 @@ function installUI(){
     #advance .variance-positive{color:#9a5b00;font-weight:700}
     #advance .variance-negative{color:#b42318;font-weight:700}
     #advance .variance-zero{color:#216e39;font-weight:700}
+    .advance-category-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+    .advance-category-option{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #e7def3;border-radius:12px;background:#fff}
+    .advance-receipt-history{margin-top:14px;padding-top:12px;border-top:1px solid #eee}
+    .advance-receipt-row{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:8px 0;border-bottom:1px dashed #eee}
+    .advance-receipt-row small{grid-column:1/-1;color:#777}
+    @media(max-width:640px){.advance-category-options{grid-template-columns:1fr}}
     @media(max-width:900px){#advance .advance-grid{grid-template-columns:1fr 1fr}#advance .advance-grid>div:first-child{grid-column:1/-1}}
   `;
   document.head.appendChild(style);
@@ -103,6 +110,7 @@ function installUI(){
   $("advanceBatchSelect").addEventListener("change",()=>{activeBatchId=$("advanceBatchSelect").value;render();});
   $("newAdvanceBatchBtn").addEventListener("click",()=>openBatchDialog());
   $("editAdvanceBatchBtn").addEventListener("click",()=>openBatchDialog(currentBatch()));
+  $("addAdvanceReceiptBtn").addEventListener("click",openReceiptDialog);
   $("newAdvanceAllocationBtn").addEventListener("click",()=>openAllocationDialog());
 
   new MutationObserver(ensurePosition).observe(nav,{childList:true});
@@ -116,12 +124,13 @@ function installDialogs(){
   <dialog id="advanceBatchDialog"><form id="advanceBatchForm" method="dialog" class="dialog-form">
     <div class="dialog-head"><h3 id="advanceBatchDialogTitle">建立預支批次</h3><button type="button" class="icon-btn" data-advance-close="advanceBatchDialog">×</button></div>
     <input type="hidden" id="advanceBatchId" />
-    <label>批次名稱<input id="advanceBatchTitle" required maxlength="120" placeholder="例如：115-1 活動經費整筆預支" /></label>
-    <div class="two-cols"><label>學期<input id="advanceBatchSemester" required maxlength="5" pattern="\\d{3}-[12]" placeholder="115-1" /></label><label>經費科目<select id="advanceBatchCategory" required></select></label></div>
+    <label>批次名稱<input id="advanceBatchTitle" required maxlength="120" placeholder="例如：115-1 活動及會議預支" /></label>
+    <div class="two-cols"><label>學期<input id="advanceBatchSemester" required maxlength="5" pattern="\\d{3}-[12]" placeholder="115-1" /></label><label>承辦人<select id="advanceBatchHandler" required></select></label></div>
+    <label>經費科目（可複選）
+      <div id="advanceBatchCategories" class="advance-category-options"></div>
+      <small class="muted">同一批預支可包含 2～3 個經費科目；後續分配時會依這些科目篩選。</small>
+    </label>
     <label>本次預支／動支總額<input id="advanceBatchTotal" required type="number" min="0" step="1" /></label>
-    <label>承辦人<select id="advanceBatchHandler" required></select></label>
-    <label class="check-row"><input id="advanceBatchReceived" type="checkbox" /><span><strong>款項已由中心領得</strong><small>勾選後請填實際領款金額與日期。</small></span></label>
-    <div id="advanceReceivedFields" class="two-cols hidden"><label>實際領款金額<input id="advanceBatchReceivedAmount" type="number" min="0" step="1" /></label><label>領款日期<input id="advanceBatchReceivedDate" type="date" /></label></div>
     <label>備註<textarea id="advanceBatchNote" rows="3" maxlength="500"></textarea></label>
     <div class="dialog-actions"><button type="button" class="ghost-btn" data-advance-close="advanceBatchDialog">取消</button><button id="advanceBatchSaveBtn" class="primary-btn" value="default">儲存</button></div>
   </form></dialog>
@@ -129,30 +138,87 @@ function installDialogs(){
   <dialog id="advanceAllocationDialog"><form id="advanceAllocationForm" method="dialog" class="dialog-form">
     <div class="dialog-head"><h3 id="advanceAllocationDialogTitle">分配活動</h3><button type="button" class="icon-btn" data-advance-close="advanceAllocationDialog">×</button></div>
     <input type="hidden" id="advanceAllocationId" />
+    <label>經費科目<select id="advanceAllocationCategory" required></select></label>
     <label>負責老師<select id="advanceAllocationOwner" required></select></label>
     <label>活動／用途<input id="advanceAllocationPurpose" required maxlength="120" placeholder="例如：戶外教育活動" /></label>
     <label>預估分配金額<input id="advanceAllocationAmount" required type="number" min="0" step="1" /></label>
     <label>備註<textarea id="advanceAllocationNote" rows="3" maxlength="300"></textarea></label>
     <div class="dialog-actions"><button type="button" class="ghost-btn" data-advance-close="advanceAllocationDialog">取消</button><button id="advanceAllocationSaveBtn" class="primary-btn" value="default">建立預估使用紀錄</button></div>
+
+  </form></dialog>
+
+  <dialog id="advanceReceiptDialog"><form id="advanceReceiptForm" method="dialog" class="dialog-form">
+    <div class="dialog-head"><h3>新增領款紀錄</h3><button type="button" class="icon-btn" data-advance-close="advanceReceiptDialog">×</button></div>
+    <label>本次實際領款金額<input id="advanceReceiptAmount" required type="number" min="1" step="1" /></label>
+    <label>實際領款日期<input id="advanceReceiptDate" required type="date" /></label>
+    <label>備註<textarea id="advanceReceiptNote" rows="3" maxlength="300" placeholder="例如：中心第一次撥款"></textarea></label>
+    <div class="dialog-actions"><button type="button" class="ghost-btn" data-advance-close="advanceReceiptDialog">取消</button><button class="primary-btn" value="default">新增領款</button></div>
   </form></dialog>`;
   document.body.appendChild(wrap);
 
   document.querySelectorAll("[data-advance-close]").forEach(b=>b.addEventListener("click",()=>$(b.dataset.advanceClose)?.close()));
-  $("advanceBatchReceived").addEventListener("change",toggleReceivedFields);
   $("advanceBatchForm").addEventListener("submit",saveBatch);
   $("advanceAllocationForm").addEventListener("submit",saveAllocation);
+  $("advanceReceiptForm").addEventListener("submit",saveReceipt);
 }
 
-function toggleReceivedFields(){
-  const received=$("advanceBatchReceived").checked;
-  $("advanceReceivedFields").classList.toggle("hidden",!received);
-  $("advanceBatchReceivedAmount").required=received;
-  $("advanceBatchReceivedDate").required=received;
+function batchCategoryIds(item){
+  const ids=Array.isArray(item?.categoryIds)?item.categoryIds.filter(Boolean):[];
+  if(ids.length)return [...new Set(ids.map(String))];
+  return item?.categoryId?[String(item.categoryId)]:[];
+}
+function batchCategoryNames(item){
+  const ids=batchCategoryIds(item);
+  const names=Array.isArray(item?.categoryNames)?item.categoryNames.filter(Boolean):[];
+  if(names.length===ids.length)return names;
+  return ids.map(id=>categories.find(c=>c.id===id)?.name||((id===item?.categoryId&&item?.categoryName)||id));
+}
+function batchReceipts(item){
+  if(Array.isArray(item?.receipts)&&item.receipts.length)return item.receipts;
+  if(item?.received===true||num(item?.receivedAmount)>0){
+    return [{id:"legacy",amount:num(item.receivedAmount||item.totalAmount),date:item.receivedDate||"",note:"舊版領款紀錄",legacy:true}];
+  }
+  return [];
+}
+function receivedTotal(item){return batchReceipts(item).reduce((s,x)=>s+num(x.amount),0);}
+function selectedBatchCategoryIds(){
+  return [...document.querySelectorAll('#advanceBatchCategories input[type="checkbox"]:checked')].map(x=>x.value);
+}
+function fillAllocationCategoryOptions(batchItem,selected=""){
+  const ids=batchCategoryIds(batchItem);
+  const names=batchCategoryNames(batchItem);
+  $("advanceAllocationCategory").innerHTML=ids.map((id,i)=>`<option value="${escAttr(id)}">${esc(names[i]||id)}</option>`).join("");
+  if(ids.includes(selected))$("advanceAllocationCategory").value=selected;
+}
+function openReceiptDialog(){
+  const b=currentBatch();if(!b)return alert("請先選擇預支批次。");
+  $("advanceReceiptForm").reset();
+  $("advanceReceiptDate").value=new Date().toISOString().slice(0,10);
+  $("advanceReceiptDialog").showModal();
+}
+async function saveReceipt(e){
+  e.preventDefault();
+  const b=currentBatch();if(!b)return;
+  const amount=num($("advanceReceiptAmount").value),date=$("advanceReceiptDate").value,note=$("advanceReceiptNote").value.trim();
+  if(amount<=0||!date)return alert("請填寫本次領款金額與日期。");
+  const receipts=batchReceipts(b).map(x=>({...x,id:x.id||crypto.randomUUID?.()||String(Date.now())}));
+  receipts.push({id:crypto.randomUUID?.()||(`r-${Date.now()}`),amount,date,note,createdBy:currentEmail,createdAt:new Date().toISOString()});
+  const total=receipts.reduce((s,x)=>s+num(x.amount),0);
+  if(total>num(b.totalAmount)&&!confirm(`累計領款 ${money.format(total)} 已超過批次總額 ${money.format(b.totalAmount)}。確定仍要新增嗎？`))return;
+  try{
+    await updateDoc(doc(db,"advanceBatches",b.id),{
+      receipts,received:total>0,receivedAmount:total,receivedDate:date,
+      updatedAt:serverTimestamp(),updatedBy:currentEmail
+    });
+    await addDoc(collection(db,"auditLogs"),{type:"advance-receipt",targetId:b.id,planId:planId(),action:"add",amount,date,actorEmail:currentEmail,createdAt:serverTimestamp()});
+    $("advanceReceiptDialog").close();
+    await loadAll();
+  }catch(err){showError(err);}
 }
 
 function populateSelectors(){
   const activeCats=categories.filter(c=>c.active!==false&&c.deleted!==true);
-  $("advanceBatchCategory").innerHTML='<option value="">請選擇</option>'+activeCats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("advanceBatchCategories").innerHTML=activeCats.map(c=>`<label class="advance-category-option"><input type="checkbox" value="${escAttr(c.id)}"><span>${esc(c.name)}</span></label>`).join("");
   const enabled=users.filter(u=>u.enabled===true);
   const opts=enabled.map(u=>`<option value="${escAttr(u.id)}">${esc(u.name||u.id)}｜${esc(u.id)}</option>`).join("");
   $("advanceBatchHandler").innerHTML='<option value="">請選擇</option>'+opts;
@@ -167,19 +233,16 @@ function openBatchDialog(item=null){
   if(item){
     $("advanceBatchTitle").value=item.title||"";
     $("advanceBatchSemester").value=item.semester||"";
-    $("advanceBatchCategory").value=item.categoryId||"";
+    const selected=new Set(batchCategoryIds(item));
+    document.querySelectorAll('#advanceBatchCategories input[type="checkbox"]').forEach(x=>x.checked=selected.has(x.value));
     $("advanceBatchTotal").value=num(item.totalAmount);
     $("advanceBatchHandler").value=item.handlerEmail||"";
-    $("advanceBatchReceived").checked=item.received===true;
-    $("advanceBatchReceivedAmount").value=item.receivedAmount??item.totalAmount??"";
-    $("advanceBatchReceivedDate").value=item.receivedDate||"";
     $("advanceBatchNote").value=item.note||"";
   }else{
     const p=$("planSelect")?.selectedOptions?.[0]?.textContent||"";
     const m=p.match(/(\d{3})/);
     $("advanceBatchSemester").value=m?`${m[1]}-1`:"";
   }
-  toggleReceivedFields();
   $("advanceBatchDialog").showModal();
 }
 
@@ -190,6 +253,9 @@ function openAllocationDialog(item=null){
   $("advanceAllocationId").value=item?.id||"";
   $("advanceAllocationDialogTitle").textContent=item?"調整活動分配":"分配活動";
   $("advanceAllocationSaveBtn").textContent=item?"儲存調整":"建立預估使用紀錄";
+  const batchItem=currentBatch();
+  const existingRecord=item?recordForAllocation(item):null;
+  fillAllocationCategoryOptions(batchItem,item?.categoryId||existingRecord?.categoryId||batchCategoryIds(batchItem)[0]||"");
   if(item){
     $("advanceAllocationOwner").value=item.ownerEmail||"";
     $("advanceAllocationPurpose").value=item.purpose||"";
@@ -202,24 +268,28 @@ function openAllocationDialog(item=null){
 async function saveBatch(e){
   e.preventDefault();
   const id=$("advanceBatchId").value;
-  const categoryId=$("advanceBatchCategory").value;
-  const category=categories.find(c=>c.id===categoryId);
+  const categoryIds=selectedBatchCategoryIds();
+  const selectedCategories=categoryIds.map(id=>categories.find(c=>c.id===id)).filter(Boolean);
   const handlerEmail=$("advanceBatchHandler").value;
   const handler=users.find(u=>u.id===handlerEmail);
   const total=num($("advanceBatchTotal").value);
   const semester=$("advanceBatchSemester").value.trim();
   if(!/^\d{3}-[12]$/.test(semester))return alert("學期格式請輸入例如 115-1。");
-  if(!category)return alert("請選擇經費科目。");
+  if(!selectedCategories.length)return alert("請至少選擇一個經費科目。");
   if(total<=0)return alert("預支總額必須大於 0。");
   const existingAlloc=id?allocations.filter(a=>a.batchId===id&&a.deleted!==true).reduce((s,a)=>s+num(a.estimatedAmount),0):0;
   if(id&&total<existingAlloc)return alert(`批次總額不可低於目前已分配的 ${money.format(existingAlloc)}。`);
-  const received=$("advanceBatchReceived").checked;
+  if(id){
+    const existingIds=new Set(allocations.filter(a=>a.batchId===id&&a.deleted!==true).map(a=>a.categoryId||recordForAllocation(a)?.categoryId).filter(Boolean));
+    const removed=[...existingIds].filter(x=>!categoryIds.includes(x));
+    if(removed.length)return alert("目前已有活動分配使用被取消勾選的經費科目，請先調整或解除那些分配後再修改批次科目。");
+  }
+  const first=selectedCategories[0];
   const data={
     planId:planId(),title:$("advanceBatchTitle").value.trim(),semester,
-    categoryId,categoryName:category.name||"",totalAmount:total,
+    categoryIds,categoryNames:selectedCategories.map(x=>x.name||""),
+    categoryId:first.id,categoryName:first.name||"",totalAmount:total,
     handlerEmail,handlerName:handler?.name||handlerEmail,
-    received,receivedAmount:received?num($("advanceBatchReceivedAmount").value):0,
-    receivedDate:received?$("advanceBatchReceivedDate").value:"",
     note:$("advanceBatchNote").value.trim(),updatedAt:serverTimestamp(),updatedBy:currentEmail
   };
   try{
@@ -238,18 +308,18 @@ async function saveAllocation(e){
   e.preventDefault();
   const batchItem=currentBatch(); if(!batchItem)return;
   const editId=$("advanceAllocationId").value;
+  const categoryId=$("advanceAllocationCategory").value;
+  const cat=categories.find(c=>c.id===categoryId);
   const ownerEmail=$("advanceAllocationOwner").value;
   const owner=users.find(u=>u.id===ownerEmail);
   const purpose=$("advanceAllocationPurpose").value.trim();
   const estimatedAmount=num($("advanceAllocationAmount").value);
+  if(!cat||!batchCategoryIds(batchItem).includes(categoryId))return alert("請選擇目前預支批次內的經費科目。");
   if(!owner||owner.enabled!==true)return alert("請選擇有效的負責老師。");
   if(estimatedAmount<=0)return alert("預估分配金額必須大於 0。");
   const same=allocations.filter(a=>a.batchId===batchItem.id&&a.deleted!==true&&a.id!==editId);
   const afterTotal=same.reduce((s,a)=>s+num(a.estimatedAmount),0)+estimatedAmount;
   if(afterTotal>num(batchItem.totalAmount))return alert(`分配後會超過本批次總額 ${money.format(batchItem.totalAmount)}。`);
-
-  const cat=categories.find(c=>c.id===batchItem.categoryId);
-  if(!cat)return alert("找不到此批次的經費科目。");
 
   try{
     if(editId){
@@ -259,11 +329,11 @@ async function saveAllocation(e){
       if(r.estimated!==true||isApproved(r))return alert("這筆已進入實際核銷或已鎖定，不能再從預支分配頁修改原預估。請在使用紀錄處理實際核銷。");
       const wb=writeBatch(db);
       wb.update(doc(db,"advanceAllocations",editId),{
-        ownerEmail,ownerName:owner.name||ownerEmail,purpose,estimatedAmount,
+        categoryId,categoryName:cat.name||"",ownerEmail,ownerName:owner.name||ownerEmail,purpose,estimatedAmount,
         note:$("advanceAllocationNote").value.trim(),updatedAt:serverTimestamp(),updatedBy:currentEmail
       });
       wb.update(doc(db,"expenseRecords",old.expenseRecordId),{
-        ownerEmail,ownerName:owner.name||ownerEmail,purpose,amount:estimatedAmount,
+        categoryId,ownerEmail,ownerName:owner.name||ownerEmail,purpose,amount:estimatedAmount,
         originalEstimatedAmount:estimatedAmount,updatedAt:serverTimestamp(),updatedBy:currentEmail
       });
       await wb.commit();
@@ -274,12 +344,12 @@ async function saveAllocation(e){
       const now=serverTimestamp();
       const wb=writeBatch(db);
       wb.set(allocationRef,{
-        planId:planId(),batchId:batchItem.id,ownerEmail,ownerName:owner.name||ownerEmail,
+        planId:planId(),batchId:batchItem.id,categoryId,categoryName:cat.name||"",ownerEmail,ownerName:owner.name||ownerEmail,
         purpose,estimatedAmount,note:$("advanceAllocationNote").value.trim(),expenseRecordId:recordRef.id,
         deleted:false,createdAt:now,createdBy:currentEmail,updatedAt:now,updatedBy:currentEmail
       });
       wb.set(recordRef,{
-        planId:planId(),categoryId:batchItem.categoryId,purpose,amount:estimatedAmount,semester:batchItem.semester,
+        planId:planId(),categoryId,purpose,amount:estimatedAmount,semester:batchItem.semester,
         estimated:true,ownerEmail,ownerName:owner.name||ownerEmail,createdBy:currentEmail,createdAt:now,
         updatedAt:now,updatedBy:currentEmail,reviewStatus:"pending",reviewed:false,locked:false,
         archived:false,amountConfirmed:false,amountManuallyConfirmed:false,
@@ -319,6 +389,7 @@ function render(){
     : '<option value="">尚未建立預支批次</option>';
   const b=currentBatch();
   $("editAdvanceBatchBtn").disabled=!b;
+  $("addAdvanceReceiptBtn").disabled=!b;
   $("newAdvanceAllocationBtn").disabled=!b;
   if(!b){
     $("advanceSummary").innerHTML="";
@@ -340,25 +411,30 @@ function render(){
   const unallocated=total-estimateTotal;
   const mustSpend=total-actualTotal;
   const realloc=total-projectedTotal;
+  const receipts=batchReceipts(b),receivedSum=receivedTotal(b),received=receivedSum>0;
   $("advanceSummary").innerHTML=[
     ["預支／動支總額",money.format(total)],
+    ["累計已領",money.format(receivedSum)],
+    ["尚未領得",money.format(total-receivedSum)],
     ["已分配預估",money.format(estimateTotal)],
     ["已實際支用",money.format(actualTotal)],
-    ["尚須支用",money.format(mustSpend)],
     ["待重新分配",money.format(realloc)]
   ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
 
-  const received=b.received===true;
+  const categoryText=batchCategoryNames(b).join("、")||"—";
+  const receiptHtml=receipts.length
+    ? `<div class="advance-receipt-history"><strong>領款紀錄</strong>${receipts.map((x,i)=>`<div class="advance-receipt-row"><span>第 ${i+1} 次｜${esc(x.date||"未填日期")}</span><strong>${money.format(x.amount||0)}</strong>${x.note?`<small>${esc(x.note)}</small>`:""}</div>`).join("")}</div>`
+    : '<div class="muted" style="margin-top:12px">尚未新增領款紀錄。</div>';
   $("advanceBatchInfo").innerHTML=`
-    <div class="panel-head"><h3>${esc(b.title||"預支批次")}</h3><span class="${received?'advance-received':'advance-not-received'}">${received?'✓ 已領錢':'尚未領錢'}</span></div>
+    <div class="panel-head"><h3>${esc(b.title||"預支批次")}</h3><span class="${received?'advance-received':'advance-not-received'}">${received?`✓ 已領 ${receipts.length} 次`:'尚未領錢'}</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
       <div><small class="muted">學期</small><strong style="display:block">${esc(b.semester||"—")}</strong></div>
-      <div><small class="muted">經費科目</small><strong style="display:block">${esc(b.categoryName||"—")}</strong></div>
+      <div><small class="muted">經費科目</small><strong style="display:block">${esc(categoryText)}</strong></div>
       <div><small class="muted">承辦人</small><strong style="display:block">${esc(b.handlerName||b.handlerEmail||"—")}</strong></div>
-      <div><small class="muted">領款</small><strong style="display:block">${received?`${money.format(b.receivedAmount||0)}｜${esc(b.receivedDate||"未填日期")}`:"尚未領款"}</strong></div>
+      <div><small class="muted">累計領款</small><strong style="display:block">${money.format(receivedSum)}</strong></div>
       <div><small class="muted">尚未分配</small><strong style="display:block">${money.format(unallocated)}</strong></div>
       <div><small class="muted">完成實際核銷活動</small><strong style="display:block">${actualCount} / ${aa.length}</strong></div>
-    </div>${b.note?`<p class="muted" style="margin:12px 0 0">備註：${esc(b.note)}</p>`:""}`;
+    </div>${receiptHtml}${b.note?`<p class="muted" style="margin:12px 0 0">備註：${esc(b.note)}</p>`:""}`;
 
   $("advanceAllocationCount").textContent=`${aa.length} 個活動`;
   if(!aa.length){$("advanceAllocationList").innerHTML='<div class="empty">尚未分配活動。</div>';return;}
@@ -375,7 +451,7 @@ function render(){
       ? `<span class="allocation-receipt confirmed">✓ 老師已確認收到</span>${receiptTime?`<small>確認時間：${esc(receiptTime)}</small>`:""}`
       : '<span class="allocation-receipt pending">尚未確認收到</span>';
     return `<div class="advance-grid">
-      <div><strong>${esc(a.purpose||"未填活動")}</strong><small>${esc(a.ownerName||a.ownerEmail||"")}</small>${receiptHtml}</div>
+      <div><strong>${esc(a.purpose||"未填活動")}</strong><small>${esc(a.ownerName||a.ownerEmail||"")}｜${esc(a.categoryName||categories.find(c=>c.id===(a.categoryId||r?.categoryId))?.name||"未標科目")}</small>${receiptHtml}</div>
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small></div>
