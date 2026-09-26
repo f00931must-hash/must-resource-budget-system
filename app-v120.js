@@ -87,13 +87,16 @@ async function loadBudgetUsers(){
     .filter(u=>u.enabled===true&&u.role!=="assistant")
     .sort((a,b)=>String(a.name||a.email).localeCompare(String(b.name||b.email),"zh-Hant"));
 }
-function renderRecordOwnerOptions(selectedEmail=""){
+function renderRecordOwnerOptions(selectedEmail="",selectedName=""){
   const wrap=$("recordOwnerWrap"),select=$("recordOwner");
   if(!wrap||!select)return;
   wrap.classList.toggle("hidden",!isManager());
   if(!isManager())return;
   const current=String(selectedEmail||state.user?.email||"").toLowerCase();
   const users=[...state.budgetUsers];
+  if(current&&!users.some(u=>u.email===current)){
+    users.push({email:current,name:selectedName||current});
+  }
   const selfEmail=String(state.user?.email||"").toLowerCase();
   if(selfEmail&&!users.some(u=>u.email===selfEmail)){
     users.push({email:selfEmail,name:state.profile?.name||state.user?.displayName||selfEmail});
@@ -363,7 +366,7 @@ function openEditRecord(id){
   const r=state.records.find(x=>x.id===id); if(!r)return;
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager() && r.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
-  $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
+  $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||"",r.ownerName||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
   $("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
   $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
