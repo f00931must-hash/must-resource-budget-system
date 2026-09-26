@@ -45,6 +45,7 @@ $("recordVoucherFile").addEventListener("change", ()=>{
   updateRecordRequirements();
 });
 $("batchDownloadBtn").addEventListener("click", batchDownloadVouchers);
+$("downloadBudgetExcelBtn")?.addEventListener("click", downloadBudgetExcel);
 
 onAuthStateChanged(auth, async user=>{
   state.user=user;
@@ -270,6 +271,8 @@ function renderRecords(){
   const rows=filteredRecords();
   $("batchDownloadBtn").classList.toggle("hidden",!isManager());
   $("batchDownloadBtn").disabled=!rows.some(r=>r.voucherUrl||r.folderUrl);
+  $("downloadBudgetExcelBtn")?.classList.toggle("hidden",!isManager());
+  if($("downloadBudgetExcelBtn")) $("downloadBudgetExcelBtn").disabled=!state.activePlanId;
   if(!state.activePlanId){ $("recordList").innerHTML='<div class="panel empty">尚未建立計畫。</div>'; return; }
   if(!rows.length){ $("recordList").innerHTML='<div class="panel empty">目前沒有符合條件的使用紀錄。</div>'; return; }
 
@@ -491,6 +494,119 @@ async function unlockRecord(id){
     await addDoc(collection(db,"auditLogs"),{type:"expense-review",targetId:id,planId:state.activePlanId,action:"unlock",actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()});
     await loadPlanData(); renderAll(); toast("已解鎖，回到待核對");
   }catch(err){ toast(`解鎖失敗：${err.message}`,5000); }
+}
+
+function excelDateTime(v){
+  if(!v)return "";
+  try{
+    if(typeof v.toDate==="function")return v.toDate().toLocaleString("zh-TW",{hour12:false});
+    if(typeof v.seconds==="number")return new Date(v.seconds*1000).toLocaleString("zh-TW",{hour12:false});
+    const d=new Date(v);return Number.isNaN(d.getTime())?"":d.toLocaleString("zh-TW",{hour12:false});
+  }catch{return "";}
+}
+function recordStageText(r){
+  if(r.estimated===true)return r.estimateStage==="purchasing"?"請購中":"預估";
+  if(isApproved(r))return "已核銷";
+  return "待核對";
+}
+function amountByStage(rows,stage){
+  return rows.filter(r=>recordStageText(r)===stage).reduce((s,r)=>s+Number(r.amount||0),0);
+}
+function downloadBudgetExcel(){
+  if(!isManager())return toast("此功能僅限經費管理員使用");
+  if(!state.activePlanId)return toast("請先選擇計畫");
+  if(!window.XLSX)return toast("Excel 元件尚未載入，請重新整理後再試",5000);
+
+  const plan=currentPlan()||{};
+  const rows=[...state.records];
+  const total=planTotal();
+  const allocated=allocatedTotal();
+  const approved=amountByStage(rows,"已核銷");
+  const pending=amountByStage(rows,"待核對");
+  const estimated=amountByStage(rows,"預估");
+  const purchasing=amountByStage(rows,"請購中");
+  const reserved=rows.reduce((s,r)=>s+Number(r.amount||0),0);
+  const remain=total-reserved;
+
+  const overview=[
+    ["欄位","內容"],
+    ["計畫名稱",plan.name||""],
+    ["年度",plan.year||""],
+    ["期別",plan.term||""],
+    ["計畫狀態",plan.active===false?"停用":"啟用"],
+    ["計畫總核定額度",total],
+    ["已編列額度",allocated],
+    ["尚未編列",total-allocated],
+    ["已核銷",approved],
+    ["待核對",pending],
+    ["預估",estimated],
+    ["請購中",purchasing],
+    ["目前總占用",reserved],
+    ["計畫剩餘額度",remain],
+    ["匯出時間",new Date().toLocaleString("zh-TW",{hour12:false})]
+  ];
+
+  const categoryRows=[["經費科目","狀態","編列額度","預估","請購中","待核對","已核銷","總占用","剩餘額度"]];
+  state.categories.forEach(cat=>{
+    const cr=rows.filter(r=>r.categoryId===cat.id);
+    const budget=Number(cat.budget||0);
+    const e=amountByStage(cr,"預估"),p=amountByStage(cr,"請購中"),w=amountByStage(cr,"待核對"),a=amountByStage(cr,"已核銷");
+    const used=cr.reduce((s,r)=>s+Number(r.amount||0),0);
+    categoryRows.push([cat.name||"",cat.active===false?"停用":"啟用",budget,e,p,w,a,used,budget-used]);
+  });
+
+  const detailRows=[["學期","經費科目","用途／摘要","負責老師","負責老師 Email","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新者","最後更新時間","紀錄 ID"]];
+  rows
+    .slice()
+    .sort((a,b)=>String(b.semester||"").localeCompare(String(a.semester||""),undefined,{numeric:true})||tsMillis(b.updatedAt||b.createdAt)-tsMillis(a.updatedAt||a.createdAt))
+    .forEach(r=>{
+      const cat=state.categories.find(c=>c.id===r.categoryId);
+      const voucher=(r.voucherUrl||r.folderUrl)?"有":"無";
+      const confirmed=r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true||r.amountConfirmedByManagerWaiver===true?"已確認":"未確認");
+      detailRows.push([
+        r.semester||"",
+        cat?.name||r.categoryName||"未分類",
+        r.purpose||"",
+        r.ownerName||"",
+        r.ownerEmail||"",
+        Number(r.amount||0),
+        recordStageText(r),
+        voucher,
+        confirmed,
+        r.note||"",
+        r.createdBy||"",
+        excelDateTime(r.createdAt),
+        r.updatedBy||"",
+        excelDateTime(r.updatedAt),
+        r.id||""
+      ]);
+    });
+
+  const semesters=[...new Set(rows.map(r=>String(r.semester||"").trim()).filter(Boolean))].sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
+  const semesterRows=[["學期","預估","請購中","待核對","已核銷","合計"]];
+  semesters.forEach(term=>{
+    const sr=rows.filter(r=>String(r.semester||"")===term);
+    const e=amountByStage(sr,"預估"),p=amountByStage(sr,"請購中"),w=amountByStage(sr,"待核對"),a=amountByStage(sr,"已核銷");
+    semesterRows.push([term,e,p,w,a,e+p+w+a]);
+  });
+
+  const wb=XLSX.utils.book_new();
+  const sheets=[
+    ["計畫總覽",overview,[22,28]],
+    ["經費編列",categoryRows,[24,10,14,14,14,14,14,14,14]],
+    ["使用紀錄明細",detailRows,[12,24,34,16,28,14,12,12,12,28,24,20,24,20,24]],
+    ["學期彙總",semesterRows,[12,14,14,14,14,14]]
+  ];
+  sheets.forEach(([name,data,widths])=>{
+    const ws=XLSX.utils.aoa_to_sheet(data);
+    ws["!cols"]=widths.map(w=>({wch:w}));
+    ws["!freeze"]={xSplit:0,ySplit:1};
+    XLSX.utils.book_append_sheet(wb,ws,name);
+  });
+
+  const safe=String(plan.name||"經費報表").replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
+  const date=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`${safe}_${date}.xlsx`);
 }
 
 async function batchDownloadVouchers(){
