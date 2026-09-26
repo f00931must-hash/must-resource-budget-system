@@ -16,6 +16,7 @@ let auth=null,db=null,currentEmail="",isManager=false;
 let dialogInstalled=false;
 let availableRecords=[];
 let currentEditAllocation=null;
+let currentBatchData=null;
 
 function app(){return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null;}
 function planId(){return $("planSelect")?.value||"";}
@@ -23,6 +24,19 @@ function batchId(){return $("advanceBatchSelect")?.value||"";}
 function esc(v){return String(v??"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[m]));}
 function num(v){return Number(v||0);}
 function approved(r){return r?.reviewStatus==="approved"||r?.reviewed===true||r?.locked===true;}
+function batchCategoryIds(b){
+  const ids=Array.isArray(b?.categoryIds)?b.categoryIds.filter(Boolean):[];
+  return ids.length?[...new Set(ids.map(String))]:(b?.categoryId?[String(b.categoryId)]:[]);
+}
+function batchCategoryNames(b){
+  const ids=batchCategoryIds(b),names=Array.isArray(b?.categoryNames)?b.categoryNames.filter(Boolean):[];
+  if(names.length===ids.length)return names;
+  return ids.map((id,i)=>id===b?.categoryId?(b?.categoryName||id):(names[i]||id));
+}
+function batchCategoryLabel(b,id){
+  const ids=batchCategoryIds(b),names=batchCategoryNames(b),i=ids.indexOf(String(id));
+  return i>=0?(names[i]||id):id;
+}
 
 async function verifyManager(){
   const user=auth?.currentUser;
@@ -43,7 +57,7 @@ function installDialog(){
     <input type="hidden" id="advanceExistingAllocationId" />
     <label>選擇使用紀錄中的預估
       <select id="advanceExistingRecordSelect" required><option value="">讀取中…</option></select>
-      <small id="advanceExistingRecordHint" class="muted">只會顯示目前批次同學期、同經費科目，且尚未被其他預支批次綁定的預估紀錄。</small>
+      <small id="advanceExistingRecordHint" class="muted">只會顯示目前批次所選經費科目、同學期，且尚未被其他預支批次綁定的預估紀錄。</small>
     </label>
     <div id="advanceExistingRecordPreview" class="panel" style="margin:0;padding:14px"><div class="muted">請先選擇一筆預估紀錄。</div></div>
     <label>備註<textarea id="advanceExistingNote" rows="3" maxlength="300"></textarea></label>
@@ -66,6 +80,7 @@ function renderPreview(){
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
       <div><small class="muted">負責老師</small><strong style="display:block">${esc(r.ownerName||r.ownerEmail||"—")}</strong></div>
       <div><small class="muted">活動／用途</small><strong style="display:block">${esc(r.purpose||"—")}</strong></div>
+      <div><small class="muted">經費科目</small><strong style="display:block">${esc(batchCategoryLabel(currentBatchData,r.categoryId)||"—")}</strong></div>
       <div><small class="muted">預估金額</small><strong style="display:block">${money.format(num(r.amount))}</strong></div>
       <div><small class="muted">學期</small><strong style="display:block">${esc(r.semester||"—")}</strong></div>
     </div>`;
@@ -88,7 +103,7 @@ async function loadCandidates(editAllocation=null){
     r.deleted!==true &&
     r.estimated===true &&
     !approved(r) &&
-    r.categoryId===batch.categoryId &&
+    batchCategoryIds(batch).includes(String(r.categoryId||"")) &&
     r.semester===batch.semester &&
     !usedRecordIds.has(r.id)
   );
@@ -96,6 +111,7 @@ async function loadCandidates(editAllocation=null){
     const current=all.find(r=>r.id===editAllocation.expenseRecordId&&r.deleted!==true&&r.estimated===true&&!approved(r));
     if(current&&!availableRecords.some(r=>r.id===current.id))availableRecords.unshift(current);
   }
+  currentBatchData=batch;
   return batch;
 }
 
@@ -113,14 +129,14 @@ async function openLinkDialog(editAllocation=null){
     $("advanceExistingNote").value=editAllocation?.note||"";
     select.disabled=!!editAllocation;
     if(availableRecords.length){
-      select.innerHTML='<option value="">請選擇預估紀錄</option>'+availableRecords.map(r=>`<option value="${r.id}">${esc(r.ownerName||r.ownerEmail||"未填老師")}｜${esc(r.purpose||"未填用途")}｜${money.format(num(r.amount))}</option>`).join("");
+      select.innerHTML='<option value="">請選擇預估紀錄</option>'+availableRecords.map(r=>`<option value="${r.id}">[${esc(batchCategoryLabel(batch,r.categoryId))}] ${esc(r.ownerName||r.ownerEmail||"未填老師")}｜${esc(r.purpose||"未填用途")}｜${money.format(num(r.amount))}</option>`).join("");
       if(editAllocation?.expenseRecordId)select.value=editAllocation.expenseRecordId;
       $("advanceExistingRecordHint").textContent=editAllocation
         ? "已綁定的使用紀錄不在此處更換；若要調整預估金額，請回到「使用紀錄」修改該筆預估。"
-        : `目前批次：${batch.semester}｜${batch.categoryName||"經費科目"}。只顯示尚未被其他預支批次綁定的預估。`;
+        : `目前批次：${batch.semester}｜${batchCategoryNames(batch).join("、")||"經費科目"}。只顯示這些科目中尚未被其他預支批次綁定的預估。`;
     }else{
       select.innerHTML='<option value="">目前沒有可分配的預估紀錄</option>';
-      $("advanceExistingRecordHint").textContent=`目前批次：${batch.semester}｜${batch.categoryName||"經費科目"}。請先到「使用紀錄」建立預估。`;
+      $("advanceExistingRecordHint").textContent=`目前批次：${batch.semester}｜${batchCategoryNames(batch).join("、")||"經費科目"}。請先到「使用紀錄」建立這些科目的預估。`;
     }
     renderPreview();
     $("advanceExistingEstimateDialog").showModal();
@@ -143,6 +159,7 @@ async function saveLink(e){
       const r={id:rSnap.id,...rSnap.data()};
       if(r.estimated!==true||approved(r))throw new Error("此筆已轉為實際核銷，不能再從預支頁調整預估");
       await updateDoc(doc(db,"advanceAllocations",editId),{
+        categoryId:r.categoryId||"",categoryName:batchCategoryLabel(currentBatchData,r.categoryId)||"",
         ownerEmail:r.ownerEmail||"",ownerName:r.ownerName||r.ownerEmail||"",purpose:r.purpose||"",
         estimatedAmount:num(r.amount),note:$("advanceExistingNote").value.trim(),
         updatedAt:serverTimestamp(),updatedBy:email
@@ -155,9 +172,10 @@ async function saveLink(e){
       const bSnap=await getDoc(doc(db,"advanceBatches",bid));
       if(!bSnap.exists()||bSnap.data().deleted===true)throw new Error("找不到目前預支批次");
       const b=bSnap.data();
-      if(r.categoryId!==b.categoryId||r.semester!==b.semester)throw new Error("此預估與目前預支批次的學期或經費科目不一致");
+      if(!batchCategoryIds(b).includes(String(r.categoryId||""))||r.semester!==b.semester)throw new Error("此預估與目前預支批次的學期或經費科目不一致");
       const aRef=await addDoc(collection(db,"advanceAllocations"),{
         planId:p,batchId:bid,expenseRecordId:r.id,
+        categoryId:r.categoryId||"",categoryName:batchCategoryLabel(b,r.categoryId)||"",
         ownerEmail:r.ownerEmail||"",ownerName:r.ownerName||r.ownerEmail||"",purpose:r.purpose||"",
         estimatedAmount:num(r.amount),note:$("advanceExistingNote").value.trim(),
         recordOrigin:"existing-estimate",deleted:false,
