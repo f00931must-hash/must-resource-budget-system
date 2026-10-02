@@ -1,5 +1,5 @@
 // Teacher own advance allocation view v1.7.6
-// Managers keep the existing advance page. Regular users only see their own allocations
+// All enabled users, including managers, see only their own allocations here
 // and can perform one action: confirm receipt of the allocated amount.
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
@@ -20,7 +20,7 @@ function installUI(){
   const nav=document.querySelector("nav.tabs"),main=document.querySelector("#appView main");
   if(!nav||!main)return;
   const tab=document.createElement("button");
-  tab.id="myAdvanceTab"; tab.className="tab"; tab.dataset.view="myAdvance"; tab.textContent="預支／動支";
+  tab.id="myAdvanceTab"; tab.className="tab"; tab.dataset.view="myAdvance"; tab.textContent="我的領款";
   const trash=nav.querySelector('[data-view="trash"]');
   if(trash)nav.insertBefore(tab,trash);else nav.appendChild(tab);
 
@@ -71,6 +71,7 @@ async function loadOwn(force=false){
 
 async function confirmReceipt(btn,item){
   if(receiptBusy||!item||item.allocationReceivedConfirmed===true)return;
+  if(String(item.ownerEmail||"").toLowerCase()!==currentEmail)return;
   const amount=money.format(Number(item.estimatedAmount||0));
   if(!confirm(`確認你已收到這筆分配金額？\n\n${item.purpose||"此筆分配"}\n金額：${amount}\n\n確認後僅記錄「已收到」，不會進行核銷。`))return;
   receiptBusy=true;
@@ -98,11 +99,12 @@ async function init(){
   }
   if(!auth||!db)return;
   onAuthStateChanged(auth,async user=>{
-    if(!user?.email)return;
-    currentEmail=user.email.toLowerCase();
+    currentEmail=user?.email?.toLowerCase()||"";
+    $("myAdvanceTab")?.remove();$("myAdvance")?.remove();
+    if(!currentEmail)return;
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
-      if(!u.exists()||u.data().enabled!==true||u.data().role==="manager")return;
+      if(!u.exists()||u.data().enabled!==true)return;
       installUI();
       $("planSelect")?.addEventListener("change",()=>{if($("myAdvance")?.classList.contains("active-view"))loadOwn().catch(showError);});
     }catch(err){showError(err);}
