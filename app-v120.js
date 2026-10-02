@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCsApWkpnJiwCsQsiPK14pgFQdqb88UJjQ",
@@ -20,6 +20,8 @@ provider.setCustomParameters({ prompt: "select_account" });
 const UPLOAD_SERVICE_URL = "https://must-free-upload-service.f00931-must.workers.dev";
 const $ = id => document.getElementById(id);
 const state = { user:null, profile:null, plans:[], activePlanId:"", categories:[], records:[], budgetUsers:[] };
+let stopRoleWatch=null;
+let previousBudgetAccount="";
 const money = new Intl.NumberFormat("zh-TW", { style:"currency", currency:"TWD", maximumFractionDigits:0 });
 
 $("loginBtn").addEventListener("click", async()=>{
@@ -48,7 +50,13 @@ $("batchDownloadBtn").addEventListener("click", batchDownloadVouchers);
 $("downloadBudgetExcelBtn")?.addEventListener("click", downloadBudgetExcel);
 
 onAuthStateChanged(auth, async user=>{
+  const nextAccount=user?.uid||"";
+  if(previousBudgetAccount&&previousBudgetAccount!==nextAccount){location.reload();return;}
+  previousBudgetAccount=nextAccount;
+  stopRoleWatch?.();stopRoleWatch=null;
   state.user=user;
+  state.profile=null;
+  document.querySelectorAll(".manager-only").forEach(el=>el.classList.add("hidden"));
   if(!user){
     $("loginView").classList.remove("hidden");
     $("appView").classList.add("hidden");
@@ -63,6 +71,11 @@ onAuthStateChanged(auth, async user=>{
       return;
     }
     state.profile=snap.data();
+    const loadedRole=state.profile.role;
+    stopRoleWatch=onSnapshot(doc(db,"users",email),live=>{
+      if(!live.exists()||live.data().enabled!==true){signOut(auth);return;}
+      if(live.data().role!==loadedRole){location.reload();}
+    },error=>{console.error("Budget role refresh failed",error);});
     if(state.profile?.role==="manager") await loadBudgetUsers();
     $("userName").textContent=state.profile.name||user.displayName||user.email;
     $("userEmail").textContent=user.email;
