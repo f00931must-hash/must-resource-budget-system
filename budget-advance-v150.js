@@ -6,14 +6,14 @@
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import {
-  getFirestore, collection, doc, getDoc, getDocs, query, where,
+  getFirestore, collection, doc, getDoc, getDocFromServer, getDocs, query, where,
   addDoc, updateDoc, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID="must-resource-budget-system";
 const $=id=>document.getElementById(id);
 const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0});
-let auth=null,db=null,currentEmail="";
+let auth=null,db=null,currentEmail="",managerEnabled=false;
 let users=[],categories=[],batches=[],allocations=[],records=[];
 let activeBatchId="";
 
@@ -407,6 +407,9 @@ async function saveAllocation(e){
 }
 
 async function loadAll(){
+  if(!managerEnabled||!auth?.currentUser?.email)return;
+  const roleSnap=await getDocFromServer(doc(db,"users",auth.currentUser.email.toLowerCase()));
+  if(!roleSnap.exists()||roleSnap.data().enabled!==true||roleSnap.data().role!=="manager"){managerEnabled=false;$("advanceTab")?.remove();$("advance")?.remove();return;}
   const p=planId();
   if(!p){batches=[];allocations=[];records=[];categories=[];render();return;}
   const [uSnap,cSnap,bSnap,aSnap,rSnap]=await Promise.all([
@@ -520,11 +523,14 @@ async function init(){
   }
   if(!auth||!db)return;
   onAuthStateChanged(auth,async user=>{
+    managerEnabled=false;
+    $("advanceTab")?.remove();$("advance")?.remove();
     if(!user?.email)return;
     currentEmail=user.email.toLowerCase();
     try{
-      const u=await getDoc(doc(db,"users",currentEmail));
+      const u=await getDocFromServer(doc(db,"users",currentEmail));
       if(!u.exists()||u.data().enabled!==true||u.data().role!=="manager")return;
+      managerEnabled=true;
       installUI();
       $("planSelect")?.addEventListener("change",()=>{activeBatchId="";loadAll().catch(showError);});
       await loadAll();
