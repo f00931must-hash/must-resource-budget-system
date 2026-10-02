@@ -502,10 +502,23 @@ function render(){
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small></div>
-      <div>${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
+      <div>${!receiptConfirmed&&String(a.ownerEmail||"").toLowerCase()===currentEmail?`<button class="primary-btn" data-manager-own-receipt="${a.id}">確認收到分配金額</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
     </div>`;
   }).join("");
+  document.querySelectorAll("[data-manager-own-receipt]").forEach(button=>button.onclick=()=>confirmOwnReceipt(button.dataset.managerOwnReceipt,button));
   document.querySelectorAll("[data-edit-advance-allocation]").forEach(x=>x.onclick=()=>openAllocationDialog(allocations.find(a=>a.id===x.dataset.editAdvanceAllocation)));
+}
+
+async function confirmOwnReceipt(id,button){
+  const item=allocations.find(a=>a.id===id);
+  const email=auth?.currentUser?.email?.toLowerCase()||"";
+  if(!item||!email||String(item.ownerEmail||"").toLowerCase()!==email||item.allocationReceivedConfirmed===true)return;
+  if(!confirm(`確認已收到「${item.purpose||"此筆分配"}」的分配金額 ${money.format(item.estimatedAmount||0)}？`))return;
+  button.disabled=true;
+  try{
+    await updateDoc(doc(db,"advanceAllocations",id),{allocationReceivedConfirmed:true,allocationReceivedAt:serverTimestamp(),allocationReceivedBy:email,updatedAt:serverTimestamp(),updatedBy:email});
+    await loadAll();
+  }catch(err){button.disabled=false;showError(err);}
 }
 
 function showError(err){
