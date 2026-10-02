@@ -29,6 +29,11 @@ function fmtTime(v){
   }catch{return "";}
 }
 function planId(){return $("planSelect")?.value||"";}
+function batchSelectionKey(){return "must-budget-selected-batch:"+currentEmail+":"+planId();}
+function rememberBatch(){
+  try{if(activeBatchId)sessionStorage.setItem(batchSelectionKey(),activeBatchId);else sessionStorage.removeItem(batchSelectionKey());}catch{}
+}
+function savedBatch(){try{return sessionStorage.getItem(batchSelectionKey())||"";}catch{return "";}}
 function currentBatch(){return batches.find(x=>x.id===activeBatchId)||null;}
 function recordForAllocation(a){return records.find(r=>r.id===a.expenseRecordId)||null;}
 function isApproved(r){return !!r&&(r.reviewStatus==="approved"||r.reviewed===true||r.locked===true);}
@@ -108,7 +113,7 @@ function installUI(){
     history.replaceState(null,"","#advance");
     loadAll().catch(showError);
   });
-  $("advanceBatchSelect").addEventListener("change",()=>{activeBatchId=$("advanceBatchSelect").value;render();});
+  $("advanceBatchSelect").addEventListener("change",()=>{activeBatchId=$("advanceBatchSelect").value;rememberBatch();render();});
   $("newAdvanceBatchBtn").addEventListener("click",()=>openBatchDialog());
   $("editAdvanceBatchBtn").addEventListener("click",()=>openBatchDialog(currentBatch()));
   $("addAdvanceReceiptBtn").addEventListener("click",openReceiptDialog);
@@ -421,7 +426,11 @@ async function loadAll(){
   batches=bSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
   allocations=aSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
   records=rSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
-  if(!activeBatchId||!batches.some(b=>b.id===activeBatchId))activeBatchId=batches[0]?.id||"";
+  if(!activeBatchId||!batches.some(b=>b.id===activeBatchId)){
+    const saved=savedBatch();
+    activeBatchId=batches.some(b=>b.id===saved)?saved:(batches[0]?.id||"");
+  }
+  rememberBatch();
   render();
 }
 
