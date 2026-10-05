@@ -470,7 +470,8 @@ function render(){
     ["尚未領得",money.format(total-receivedSum)],
     ["已分配預估",money.format(estimateTotal)],
     ["已實際支用",money.format(actualTotal)],
-    ["待重新分配",money.format(realloc)]
+    ["待重新分配",money.format(realloc)],
+    ["實際剩餘金額",money.format(receivedSum-estimateTotal)]
   ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
 
   const categoryText=batchCategoryNames(b).join("、")||"—";
