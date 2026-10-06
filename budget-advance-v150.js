@@ -1,4 +1,4 @@
-import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.0.0";
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.1.0";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
@@ -528,7 +528,7 @@ function render(){
     const receiptHtml=receiptConfirmed
       ? `<span class="allocation-receipt confirmed">✓ 老師已確認收到</span>${receiptTime?`<small>確認時間：${esc(receiptTime)}</small>`:""}`
       : '<span class="allocation-receipt pending">尚未確認收到</span>';
-    return `<div class="advance-grid">
+    return `<div class="advance-grid" data-allocation-id="${escAttr(a.id)}" style="background:#f3f4f6;border-radius:10px;padding:14px 10px;">
       <div><strong>${esc(a.purpose||"未填活動")}</strong><small>${esc(a.ownerName||a.ownerEmail||"")}｜${esc(a.categoryName||categories.find(c=>c.id===(a.categoryId||r?.categoryId))?.name||"未標科目")}</small>${receiptHtml}</div>
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
