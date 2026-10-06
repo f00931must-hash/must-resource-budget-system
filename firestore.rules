@@ -69,6 +69,92 @@ service cloud.firestore {
         );
     }
 
+    function linked(data) {
+      return data.get('advanceAllocationId', '') != '';
+    }
+    function adjustmentApproval() {
+      let before = resource.data.get('actualAdjustment', {});
+      let after = request.resource.data.get('actualAdjustment', {});
+      return manager()
+        && before.get('status', '') == 'pending'
+        && after.get('status', '') == 'approved'
+        && after.get('amount', -1) == before.get('amount', -2)
+        && after.get('requestedBy', '') == before.get('requestedBy', '')
+        && after.get('reviewedBy', '') == email()
+        && request.resource.data.amount == before.amount
+        && request.resource.data.estimated == false
+        && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.settlementAmount == before.amount;
+    }
+    function linkedRecordProtected() {
+      return !linked(resource.data) || (
+        request.resource.data.get('advanceAllocationId', '') == resource.data.advanceAllocationId
+        && request.resource.data.get('advanceBatchId', '') == resource.data.get('advanceBatchId', '')
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.categoryId == resource.data.categoryId
+        && request.resource.data.semester == resource.data.semester
+        && request.resource.data.get('originalEstimatedAmount', 0) == resource.data.get('originalEstimatedAmount', 0)
+        && (request.resource.data.amount == resource.data.amount || adjustmentApproval())
+        && (request.resource.data.get('estimated', false) == resource.data.get('estimated', false) || adjustmentApproval())
+      );
+    }
+    function adjustmentProtected() {
+      let before = resource.data.get('actualAdjustment', {});
+      let after = request.resource.data.get('actualAdjustment', {});
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustment'])
+        || (
+          linked(resource.data)
+          && before.get('status', '') in ['', 'rejected']
+          && after.keys().hasOnly(['status','amount','reason','requestedBy','requestedAt'])
+          && after.status == 'pending'
+          && after.amount is number && after.amount >= 0
+          && after.amount <= get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.estimatedAmount
+          && after.reason is string && after.reason.size() > 0 && after.reason.size() <= 300
+          && after.requestedBy == email() && after.requestedAt == request.time
+          && request.resource.data.estimated == true
+          && request.resource.data.amountConfirmed == true && hasVoucher(request.resource.data)
+        )
+        || (manager() && before.get('status', '') == 'pending' && (
+          adjustmentApproval()
+          || (after.status == 'rejected' && after.amount == before.amount
+            && after.requestedBy == before.requestedBy && after.reviewedBy == email()
+            && request.resource.data.amount == resource.data.amount)
+        ));
+    }
+    function allocationFixed() {
+      return request.resource.data.estimatedAmount == resource.data.estimatedAmount
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.expenseRecordId == resource.data.expenseRecordId
+        && request.resource.data.batchId == resource.data.batchId;
+    }
+    function refundOwed() {
+      let r = get(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data;
+      return r.get('estimated', true) == false
+        && resource.data.get('allocationReceivedConfirmed', false) == true
+        && resource.data.estimatedAmount > r.amount
+        && request.resource.data.get('refundAmount', 0) == resource.data.estimatedAmount - r.amount;
+    }
+    function teacherRefundReport() {
+      return enabledUser() && resource.data.ownerEmail == email()
+        && resource.data.get('refundReported', false) == false
+        && resource.data.get('refundReceivedConfirmed', false) == false
+        && request.resource.data.refundReported == true
+        && request.resource.data.refundReportedBy == email()
+        && request.resource.data.refundReportedAt == request.time
+        && refundOwed()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'refundReported','refundAmount','refundReportedBy','refundReportedAt','updatedAt','updatedBy'
+        ]);
+    }
+    function refundReceiptProtected() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['refundReceivedConfirmed','refundReceivedBy','refundReceivedAt'])
+        || (manager() && resource.data.get('refundReported', false) == true
+          && resource.data.get('refundReceivedConfirmed', false) == false
+          && request.resource.data.refundReceivedConfirmed == true
+          && request.resource.data.refundReceivedBy == email()
+          && request.resource.data.refundReceivedAt == request.time
+          && request.resource.data.refundAmount == resource.data.refundAmount && refundOwed());
+    }
+
     match /users/{userEmail} {
       allow read: if manager()
         || (enabledUser() && userEmail == email());
@@ -100,7 +186,9 @@ service cloud.firestore {
 
       allow create, delete: if manager();
 
-      allow update: if manager()
+      allow update: if allocationFixed() && refundReceiptProtected() && (
+        manager()
+        || teacherRefundReport()
         || (
           enabledUser()
           && resource.data.ownerEmail == email()
@@ -115,7 +203,7 @@ service cloud.firestore {
             'updatedAt',
             'updatedBy'
           ])
-        );
+        ));
     }
 
     // Reminder configuration and reminder history are manager-only.
@@ -150,7 +238,8 @@ service cloud.firestore {
           )
         );
 
-      allow update: if enabledUser() && (
+      allow update: if enabledUser() && linkedRecordProtected() && adjustmentProtected()
+        && (manager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory'])) && (
         manager()
         || (
           resource.data.ownerEmail == email()
@@ -167,7 +256,7 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if enabledUser() && (
+      allow delete: if enabledUser() && !linked(resource.data) && (
         manager()
         || (
           resource.data.ownerEmail == email()
