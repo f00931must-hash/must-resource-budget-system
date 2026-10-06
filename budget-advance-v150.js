@@ -1,3 +1,4 @@
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.0.0";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
@@ -360,6 +361,7 @@ async function saveAllocation(e){
   e.preventDefault();
   const batchItem=currentBatch(); if(!batchItem)return;
   const editId=$("advanceAllocationId").value;
+  if(editId)return alert("已分配金額鎖定，請使用實際金額申請流程。");
   const categoryId=$("advanceAllocationCategory").value;
   const cat=categories.find(c=>c.id===categoryId);
   const ownerEmail=$("advanceAllocationOwner").value;
@@ -370,7 +372,7 @@ async function saveAllocation(e){
   if(!owner||owner.enabled!==true)return alert("請選擇有效的負責老師。");
   if(estimatedAmount<=0)return alert("預估分配金額必須大於 0。");
   const same=allocations.filter(a=>a.batchId===batchItem.id&&a.deleted!==true&&a.id!==editId);
-  const afterTotal=same.reduce((s,a)=>s+num(a.estimatedAmount),0)+estimatedAmount;
+  const afterTotal=same.reduce((s,a)=>s+num(a.estimatedAmount)-confirmedRefund(a,recordForAllocation(a)),0)+estimatedAmount;
   if(afterTotal>num(batchItem.totalAmount))return alert(`分配後會超過本批次總額 ${money.format(batchItem.totalAmount)}。`);
 
   try{
@@ -464,9 +466,10 @@ function render(){
     else projectedTotal+=num(a.estimatedAmount);
   }
   const total=num(b.totalAmount);
-  const unallocated=total-estimateTotal;
+  const unallocated=total-estimateTotal+aa.reduce((sum,a)=>sum+confirmedRefund(a,recordForAllocation(a)),0);
   const mustSpend=total-actualTotal;
-  const realloc=total-projectedTotal;
+  const returnedTotal=aa.reduce((sum,a)=>sum+confirmedRefund(a,recordForAllocation(a)),0);
+  const realloc=total-estimateTotal+returnedTotal;
   const receipts=batchReceipts(b),receivedSum=receivedTotal(b),received=receivedSum>0;
   $("advanceSummary").innerHTML=[
     ["預支／動支總額",money.format(total)],
@@ -475,7 +478,7 @@ function render(){
     ["已分配預估",money.format(estimateTotal)],
     ["已實際支用",money.format(actualTotal)],
     ["待重新分配",money.format(realloc)],
-    ["實際剩餘金額",money.format(receivedSum-estimateTotal)]
+    ["實際剩餘金額",money.format(receivedSum-estimateTotal+returnedTotal)]
   ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
 
   const assignedTeachers=new Map();
@@ -519,7 +522,7 @@ function render(){
     const variance=actual===null?null:num(a.estimatedAmount)-actual;
     const status=!r?'找不到使用紀錄':r.estimated===true?'預估中':isApproved(r)?'已核銷・已鎖定':'已轉實際・待核對';
     const varianceHtml=variance===null?'—':variance===0?'<span class="variance-zero">剛好</span>':variance>0?`<span class="variance-positive">多估 ${money.format(variance)}</span>`:`<span class="variance-negative">少估 ${money.format(Math.abs(variance))}</span>`;
-    const canEdit=!!r&&r.estimated===true&&!isApproved(r);
+    const canEdit=false;
     const receiptConfirmed=a.allocationReceivedConfirmed===true;
     const receiptTime=fmtTime(a.allocationReceivedAt);
     const receiptHtml=receiptConfirmed
@@ -529,10 +532,11 @@ function render(){
       <div><strong>${esc(a.purpose||"未填活動")}</strong><small>${esc(a.ownerName||a.ownerEmail||"")}｜${esc(a.categoryName||categories.find(c=>c.id===(a.categoryId||r?.categoryId))?.name||"未標科目")}</small>${receiptHtml}</div>
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
-      <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small></div>
+      <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small>${settlementMarkup(a,r,true)}</div>
       <div>${!receiptConfirmed&&String(a.ownerEmail||"").toLowerCase()===currentEmail?`<button class="primary-btn" data-manager-own-receipt="${a.id}">確認收到分配金額</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
     </div>`;
   }).join("");
+  $("advanceAllocationList").querySelectorAll("[data-settlement-action]").forEach(button=>button.onclick=()=>settlementAction(button).catch(showError));
   document.querySelectorAll("[data-manager-own-receipt]").forEach(button=>button.onclick=()=>confirmOwnReceipt(button.dataset.managerOwnReceipt,button));
   document.querySelectorAll("[data-edit-advance-allocation]").forEach(x=>x.onclick=()=>openAllocationDialog(allocations.find(a=>a.id===x.dataset.editAdvanceAllocation)));
 }
