@@ -1,4 +1,4 @@
-import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.0.0";
+import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.1.0";
 // Teacher own advance allocation view v1.7.6
 // All enabled users, including managers, see only their own allocations here
 // and can perform one action: confirm receipt of the allocated amount.
@@ -28,7 +28,7 @@ function installUI(){
   const section=document.createElement("section");
   section.id="myAdvance"; section.className="view";
   section.innerHTML=`
-    <div class="section-head"><div><h2>我的預支／動支分配</h2><p>查看管理員分配給你的預支／動支金額。在此確認領款與申報退款；實際金額先到「使用紀錄」申請，由管理員確認。</p></div></div>
+    <div class="section-head"><div><h2>我的預支／動支分配</h2><p>查看管理員分配給你的預支／動支金額。在此確認領款與申報退款；退款直接填退款金額，由管理員確認收到後同步更正使用紀錄。</p></div></div>
     <div id="myAdvanceList" class="panel"><div class="empty">讀取中…</div></div>`;
   main.appendChild(section);
 
