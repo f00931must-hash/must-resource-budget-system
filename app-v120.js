@@ -374,6 +374,7 @@ function openNewRecord(){
   if(!state.activePlanId)return toast("請先建立計畫");
   if(!isPlanActive())return toast("此計畫已停用，無法新增使用紀錄");
   if(!state.categories.some(c=>c.active!==false))return toast("此計畫尚未建立可使用的經費項目");
+  $("recordAmount").readOnly=false; $("recordActualAdjustmentWrap").classList.add("hidden");
   $("recordForm").reset(); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄";
   renderRecordOwnerOptions(state.user.email.toLowerCase());
   $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; updateRecordRequirements(); $("recordDialog").showModal();
@@ -390,6 +391,13 @@ function openEditRecord(id){
     $("existingVoucherBox").classList.remove("hidden");
     $("existingVoucherBox").innerHTML=`目前附件：<a class="text-link" target="_blank" rel="noopener" href="${escAttr(r.voucherUrl||r.folderUrl)}">${esc(r.voucherFileName||"查看既有核銷單據")}</a><br><small>如重新選擇檔案，儲存後會以新附件取代。</small>`;
   }else { $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; }
+  const linked=!!r.advanceAllocationId;
+  $("recordAmount").readOnly=linked;
+  $("recordActualAdjustmentWrap").classList.toggle("hidden",!linked);
+  $("recordProposedActualAmount").value=r.actualAdjustment?.status==="rejected"?r.actualAdjustment.amount:"";
+  $("recordAdjustmentReason").value=r.actualAdjustment?.status==="rejected"?r.actualAdjustment.reason:"";
+  $("recordProposedActualAmount").disabled=r.actualAdjustment?.status==="pending";
+  $("recordAdjustmentReason").disabled=r.actualAdjustment?.status==="pending";
   $("recordDialogTitle").textContent="編輯使用紀錄"; updateRecordRequirements(); $("recordDialog").showModal();
 }
 function updateRecordRequirements(){
@@ -435,14 +443,30 @@ async function saveRecord(e){
   if(existing&&isApproved(existing))return toast("此筆已核銷並鎖定，請先解鎖");
   if(existing&&!isManager()&&existing.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
   const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;
-  const recordOwner=selectedRecordOwner(existing);
+  const linked=!!existing?.advanceAllocationId;
+  if(linked&&existing.actualAdjustment?.status==="pending")return toast("實際金額申請待管理員確認，暫時不能修改此筆紀錄");
+  if(linked&&categoryId!==existing.categoryId)return toast("已分配經費項目鎖定");
+  if(linked&&semester!==existing.semester)return toast("已分配學期鎖定");
+  if(linked&&amount!==Number(existing.amount||0))return toast("已分配金額鎖定，請填寫實際金額申請");
+  const proposedRaw=$("recordProposedActualAmount").value.trim();
+  const submitting=linked&&proposedRaw!=="";
+  if(linked&&!existing.estimated&&estimated)return toast("已確認實際金額，不能改回預估");
+  const proposedAmount=Number(proposedRaw),reason=$("recordAdjustmentReason").value.trim();
+  if(submitting&&existing.actualAdjustment?.status==="pending")return toast("已有申請待管理員確認");
+  if(submitting&&(!Number.isFinite(proposedAmount)||proposedAmount<0||proposedAmount>Number(existing.originalEstimatedAmount??existing.amount)))return toast("實際金額不可超過原分配；超支請先另辦追加");
+  if(submitting&&!reason)return toast("請填實際金額說明");
+  const recordOwner=linked?{email:existing.ownerEmail,name:existing.ownerName}:selectedRecordOwner(existing);
   const cat=state.categories.find(c=>c.id===categoryId); if(!cat)return toast("請選擇經費項目");
   if(!/^\d{3}-[12]$/.test(semester))return toast("學期請輸入例如 114-2、115-1");
   const other=state.records.filter(r=>r.categoryId===categoryId&&r.id!==id).reduce((s,r)=>s+Number(r.amount||0),0);
   if(other+amount>Number(cat.budget||0))return toast(`此筆會超過「${cat.name}」編列額度`,5000);
   const file=$("recordVoucherFile").files?.[0]||null, oldUrl=existing?.voucherUrl||existing?.folderUrl||"";
   if(file&&file.size>20*1024*1024)return toast("核銷單據檔案不可超過 20 MB",5000);
-  if(!estimated){
+  if(submitting){
+    if(!file&&!oldUrl)return toast("實際金額申請請先附上核銷單據");
+    if(!$("recordAdjustmentAmountConfirm").checked)return toast("請確認單據與申請的實際金額相同");
+  }
+  if(!estimated&&!submitting){
     if(!file&&!oldUrl)return toast("正式核銷紀錄請先上傳核銷單據");
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
@@ -455,6 +479,11 @@ async function saveRecord(e){
       reviewStatus:estimated?"estimated":"pending",reviewed:false,locked:false,note:$("recordNote").value.trim(),
       ownerEmail:recordOwner.email,ownerName:recordOwner.name,
       createdBy:existing?.createdBy||state.user.email.toLowerCase(),updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()};
+    if(submitting){
+      data.estimated=true;data.estimateStage="reimbursing";data.reviewStatus="estimated";
+      data.archived=true;data.amountConfirmed=true;data.amountManuallyConfirmed=true;
+      data.actualAdjustment={status:"pending",amount:proposedAmount,reason,requestedBy:state.user.email.toLowerCase(),requestedAt:serverTimestamp()};
+    }
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(id)await updateDoc(doc(db,"expenseRecords",id),data); else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     if(isManager()&&existing&&String(existing.ownerEmail||"").toLowerCase()!==recordOwner.email){
