@@ -379,8 +379,15 @@ function openNewRecord(){
   renderRecordOwnerOptions(state.user.email.toLowerCase());
   $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; updateRecordRequirements(); $("recordDialog").showModal();
 }
-function openEditRecord(id){
-  const r=state.records.find(x=>x.id===id); if(!r)return;
+async function openEditRecord(id){
+  let r=state.records.find(x=>x.id===id); if(!r)return;
+  try{
+    const snap=await getDoc(doc(db,"expenseRecords",id));
+    if(!snap.exists())return toast("找不到此使用紀錄");
+    r={id:snap.id,...snap.data()};
+    const index=state.records.findIndex(x=>x.id===id);
+    if(index>=0)state.records[index]=r;
+  }catch(err){return toast("讀取最新使用紀錄失敗："+err.message,5000);}
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager() && r.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
   $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||"",r.ownerName||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
@@ -880,3 +887,9 @@ function toast(msg,ms=2500){
 }
 function esc(v){ return String(v??"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[m])); }
 function escAttr(v){ return esc(v).replace(/'/g,"&#39;"); }
+
+window.addEventListener("budget-settlement-refresh",async()=>{
+  if(!state.user||!state.activePlanId)return;
+  try{await loadPlanData();renderAll();}
+  catch(err){console.warn("refresh records after advance change failed",err);}
+});
