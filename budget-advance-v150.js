@@ -16,6 +16,10 @@ const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maxim
 let auth=null,db=null,currentEmail="";
 let users=[],categories=[],batches=[],allocations=[],records=[];
 let activeBatchId="";
+let pendingReceiptTeacher="*";
+function pendingReceiptTotal(items,teacher="*"){
+  return items.filter(a=>a.deleted!==true&&a.allocationReceivedConfirmed!==true&&(teacher==="*"||String(a.ownerEmail||"").toLowerCase()===teacher)).reduce((sum,a)=>sum+num(a.estimatedAmount),0);
+}
 
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
 function esc(v){return String(v??"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[m]));}
@@ -473,6 +477,20 @@ function render(){
     ["待重新分配",money.format(realloc)],
     ["實際剩餘金額",money.format(receivedSum-estimateTotal)]
   ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
+
+  const assignedTeachers=new Map();
+  for(const a of aa){
+    const email=String(a.ownerEmail||"").toLowerCase();
+    const user=users.find(u=>String(u.id||"").toLowerCase()===email);
+    assignedTeachers.set(email,user?.name||a.ownerName||"未填姓名");
+  }
+  if(pendingReceiptTeacher!=="*"&&!assignedTeachers.has(pendingReceiptTeacher))pendingReceiptTeacher="*";
+  const teacherOptions=[...assignedTeachers].sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant")).map(([email,name])=>`<option value="${escAttr(email)}" ${email===pendingReceiptTeacher?"selected":""}>${esc(name)}</option>`).join("");
+  $("advanceSummary").insertAdjacentHTML("beforeend",`<div class="summary-card"><span>已分配・尚未確認收到</span><select id="advancePendingReceiptTeacher" aria-label="查看老師尚未確認收到的分配金額" style="margin:6px 0 8px;width:100%"><option value="*" ${pendingReceiptTeacher==="*"?"selected":""}>全部老師</option>${teacherOptions}</select><strong id="advancePendingReceiptAmount">${money.format(pendingReceiptTotal(aa,pendingReceiptTeacher))}</strong></div>`);
+  $("advancePendingReceiptTeacher").onchange=()=>{
+    pendingReceiptTeacher=$("advancePendingReceiptTeacher").value;
+    $("advancePendingReceiptAmount").textContent=money.format(pendingReceiptTotal(aa,pendingReceiptTeacher));
+  };
 
   const categoryText=batchCategoryNames(b).join("、")||"—";
   const receiptHtml=receipts.length
