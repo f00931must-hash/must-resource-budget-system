@@ -29,6 +29,7 @@ async function verifyManager(){
 
 function requestAdvanceRefresh(){
   window.dispatchEvent(new CustomEvent("budget-advance-refresh"));
+  window.dispatchEvent(new Event("budget-settlement-refresh"));
 }
 
 function ensureBatchDeleteButton(){
@@ -63,11 +64,8 @@ function addDeleteButton(parent,id,label="解除分配"){
 }
 
 function ensureNormalAllocationDeleteButtons(){
-  if(!manager)return;
-  document.querySelectorAll("#advanceAllocationList [data-edit-advance-allocation]").forEach(edit=>{
-    const id=edit.dataset.editAdvanceAllocation||"";
-    addDeleteButton(edit.parentElement,id,"解除分配");
-  });
+ if(!manager)return;
+ document.querySelectorAll("#advanceAllocationList .advance-grid[data-allocation-id]").forEach(row=>addDeleteButton(row.lastElementChild,row.dataset.allocationId,"刪除分配"));
 }
 
 function normalizeMoneyText(v){
@@ -188,15 +186,11 @@ async function deleteAllocation(id){
       return;
     }
 
-    if(r.estimated!==true||approved(r)){
-      alert("此活動已轉為實際核銷或已鎖定，不能從預支／動支頁直接解除。");
-      return;
-    }
 
-    const legacyCreatedByAdvance = r.source==="advance-allocation" && a.recordOrigin!=="existing-estimate";
+    const legacyCreatedByAdvance = false;
     const consequence = legacyCreatedByAdvance
       ? "對應的舊版測試預估使用紀錄也會一併移除。"
-      : "只會解除預支分配；原本的預估使用紀錄會保留。";
+      : "只會解除預支分配；原本使用紀錄會保留，老師的我的領款項目會移除，額度回到待分配。";
     if(!confirm(`確定解除「${a.purpose||"此活動"}」的預支分配嗎？\n\n負責老師：${a.ownerName||a.ownerEmail||"—"}\n預估金額：${Number(a.estimatedAmount||0).toLocaleString("zh-TW")} 元\n\n${consequence}`))return;
 
     const wb=writeBatch(db);
