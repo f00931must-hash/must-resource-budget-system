@@ -518,12 +518,12 @@ function excelDateTime(v){
   }catch{return "";}
 }
 function recordStageText(r){
-  if(r.estimated===true)return r.estimateStage==="purchasing"?"請購中":"預估";
+  if(r.estimated===true)return r.estimateStage==="reimbursing"?"核銷中":r.estimateStage==="purchasing"?"請購中":"預估";
   if(isApproved(r))return "已核銷";
   return "待核對";
 }
 function amountByStage(rows,stage){
-  return rows.filter(r=>recordStageText(r)===stage).reduce((s,r)=>s+Number(r.amount||0),0);
+  return rows.filter(r=>recordStageText(r)===stage||(stage==="預估"&&recordStageText(r)==="核銷中")).reduce((s,r)=>s+Number(r.amount||0),0);
 }
 function budgetExcelStyleCell(cell,{fill,fontColor="FF243B53",bold=false,size=11,align="left",border=true}={}){
   cell.font={name:"Microsoft JhengHei",color:{argb:fontColor},bold,size};
