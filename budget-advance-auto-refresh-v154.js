@@ -44,4 +44,4 @@ restoreAdvanceWhenPlanReady().catch(err=>console.warn("advance startup restore f
 
 // Regular teachers get a separate allocation view with one action:
 // confirm receipt of the allocated amount.
-await import("./budget-my-advance-v170.js?v=1.7.6");
+await import("./budget-my-advance-v170.js?v=1.9.0");
