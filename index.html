@@ -50,7 +50,7 @@
         <div class="panel filters review-filters">
           <select id="filterCategory"><option value="">全部經費項目</option></select>
           <select id="filterSemester"><option value="">全部學期</option></select>
-          <select id="filterReview"><option value="">全部核銷狀態</option><option value="pending">待核對</option><option value="approved">已核銷</option><option value="estimated">預估／請購中</option></select>
+          <select id="filterReview"><option value="">全部核銷狀態</option><option value="pending">待核對</option><option value="approved">已核銷</option><option value="estimated">預估／請購中／核銷中</option></select>
           <select id="filterIssue"><option value="">全部資料狀態</option><option value="missingVoucher">缺少核銷單據</option><option value="unconfirmed">未確認 Key 金額</option></select>
           <input id="searchInput" placeholder="搜尋用途、老師或學期" />
         </div>
@@ -88,12 +88,14 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <label class="check-row" style="margin:0"><input type="checkbox" id="recordStageEstimated" /><span><strong>預估</strong></span></label>
         <label class="check-row" style="margin:0"><input type="checkbox" id="recordStagePurchasing" /><span><strong>請購中</strong></span></label>
+        <label class="check-row" style="margin:0"><input type="checkbox" id="recordStageReimbursing" /><span><strong>核銷中</strong></span></label>
+        <label class="check-row" style="margin:0"><input type="checkbox" id="recordHanlongAdvance" /><span><strong>漢龍預支</strong></span></label>
       </div>
-      <small style="display:block;margin-top:8px">「預估」與「請購中」皆可先不附核銷單據；兩者都未勾選時，依原本正式核銷流程辦理。</small>
+      <small style="display:block;margin-top:8px">「預估」、「請購中」、「核銷中」皆計入預估金額，可先不附核銷單據；三者皆未勾選時，依正式核銷流程辦理。「漢龍預支」可另行勾選。</small>
     </div>
 
     <div class="voucher-upload">
-      <label>核銷單據（預估／請購中可空白）<input id="recordVoucherFile" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" /></label>
+      <label>核銷單據（預估／請購中／核銷中可空白）<input id="recordVoucherFile" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" /></label>
       <p id="voucherRequirementHint" class="hint">正式送核銷前，請上傳核銷單據並確認單據金額與 Key 的金額相同。</p>
       <div id="existingVoucherBox" class="existing-voucher hidden"></div>
       <label id="uploadConfirmWrap" class="check-row confirm-row"><input id="recordArchived" type="checkbox" /><span><strong>我已上傳核銷單據</strong></span></label>
@@ -115,7 +117,7 @@
   <div id="toast" class="toast hidden"></div>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
   <script type="module" src="./budget-private-assets-v123.js?v=1.6.7"></script>
-  <script type="module" src="./app-v165-loader.js?v=1.6.10"></script>
+  <script type="module" src="./app-v165-loader.js?v=1.6.11"></script>
   <script type="module" src="./budget-attachment-delete-v126.js?v=1.6.7"></script>
   <script type="module" src="./budget-batch-category-v127.js?v=1.6.7"></script>
   <script type="module" src="./budget-trash-v128.js?v=1.6.7"></script>
@@ -134,7 +136,7 @@
   <script type="module" src="./budget-advance-auto-refresh-v154.js?v=1.7.5"></script>
   <script type="module" src="./budget-reminder-v160.js?v=1.6.7"></script>
   <script type="module" src="./budget-reminder-window-v163.js?v=1.6.7"></script>
-  <script type="module" src="./budget-estimate-stage-v165.js?v=1.6.7"></script>
+  <script type="module" src="./budget-estimate-stage-v165.js?v=1.6.8"></script>
   <script type="module" src="./budget-reminder-email-v168.js?v=1.6.8"></script>
   <script type="module" src="./budget-submit-guard-v169.js?v=1.6.9"></script>
 </body>
