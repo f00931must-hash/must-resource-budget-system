@@ -7,13 +7,13 @@ const $=id=>document.getElementById(id);
 function syncFromVisible(changed){
   const estimated=$("recordStageEstimated");
   const purchasing=$("recordStagePurchasing");
+  const reimbursing=$("recordStageReimbursing");
   const hidden=$("recordEstimated");
   if(!estimated||!purchasing||!hidden)return;
 
-  if(changed===estimated && estimated.checked) purchasing.checked=false;
-  if(changed===purchasing && purchasing.checked) estimated.checked=false;
+  if(changed?.checked)for(const control of [estimated,purchasing,reimbursing])if(control&&control!==changed)control.checked=false;
 
-  hidden.checked=estimated.checked||purchasing.checked;
+  hidden.checked=estimated.checked||purchasing.checked||reimbursing?.checked===true;
   hidden.dispatchEvent(new Event("change",{bubbles:true}));
 }
 
@@ -24,6 +24,8 @@ function clearVisibleOnNew(){
   const purchasing=$("recordStagePurchasing");
   if(estimated)estimated.checked=false;
   if(purchasing)purchasing.checked=false;
+  if($("recordStageReimbursing"))$("recordStageReimbursing").checked=false;
+  if($("recordHanlongAdvance"))$("recordHanlongAdvance").checked=false;
   const hidden=$("recordEstimated");
   if(hidden)hidden.checked=false;
 }
@@ -36,6 +38,7 @@ function install(){
 
   estimated.addEventListener("change",()=>syncFromVisible(estimated));
   purchasing.addEventListener("change",()=>syncFromVisible(purchasing));
+  $("recordStageReimbursing")?.addEventListener("change",()=>syncFromVisible($("recordStageReimbursing")));
 
   dialog?.addEventListener("close",()=>{
     if($("recordId")?.value==="") clearVisibleOnNew();
