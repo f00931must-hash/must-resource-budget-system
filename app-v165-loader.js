@@ -15,27 +15,27 @@ async function loadStageAwareBudgetApp(){
   const replacements = [
     [
       `const statusBadge=r.estimated===true\n      ? '<span class="status estimated">預估</span>'`,
-      `const statusBadge=r.estimated===true\n      ? (r.estimateStage==="purchasing"?'<span class="status estimated">請購中</span>':'<span class="status estimated">預估</span>')`
+      `const statusBadge=r.estimated===true\n      ? (r.estimateStage==="reimbursing"?'<span class="status estimated">核銷中</span>':r.estimateStage==="purchasing"?'<span class="status estimated">請購中</span>':'<span class="status estimated">預估</span>')`
     ],
     [
       `$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;`,
-      `$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true; if($("recordStageEstimated")) $("recordStageEstimated").checked=r.estimated===true&&r.estimateStage!=="purchasing"; if($("recordStagePurchasing")) $("recordStagePurchasing").checked=r.estimated===true&&r.estimateStage==="purchasing";`
+      `$("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true; if($("recordStageEstimated")) $("recordStageEstimated").checked=r.estimated===true&&!["purchasing","reimbursing"].includes(r.estimateStage); if($("recordStagePurchasing")) $("recordStagePurchasing").checked=r.estimated===true&&r.estimateStage==="purchasing"; if($("recordStageReimbursing")) $("recordStageReimbursing").checked=r.estimated===true&&r.estimateStage==="reimbursing"; if($("recordHanlongAdvance")) $("recordHanlongAdvance").checked=r.hanlongAdvance===true;`
     ],
     [
       `const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;`,
-      `const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked, estimateStage=estimated?($("recordStagePurchasing")?.checked?"purchasing":"estimated"):"";`
+      `const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked, estimateStage=estimated?($("recordStageReimbursing")?.checked?"reimbursing":$("recordStagePurchasing")?.checked?"purchasing":"estimated"):"";`
     ],
     [
       `const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,`,
-      `const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,estimateStage,`
+      `const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,estimateStage,hanlongAdvance:$("recordHanlongAdvance")?.checked===true,`
     ],
     [
       `? "預估金額可先不附核銷單據，也不需要勾選金額確認。"`,
-      `? "預估／請購中可先不附核銷單據，也不需要勾選金額確認。"`
+      `? "預估／請購中／核銷中可先不附核銷單據，也不需要勾選金額確認。"`
     ],
     [
       `toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");`,
-      `toast(estimated?(estimateStage==="purchasing"?"請購中紀錄已儲存":"預估紀錄已儲存"):"已送出，等待管理員核對");`
+      `toast(estimated?(estimateStage==="reimbursing"?"核銷中紀錄已儲存":estimateStage==="purchasing"?"請購中紀錄已儲存":"預估紀錄已儲存"):"已送出，等待管理員核對");`
     ]
   ];
 
