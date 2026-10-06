@@ -374,7 +374,7 @@ function openNewRecord(){
   if(!state.activePlanId)return toast("請先建立計畫");
   if(!isPlanActive())return toast("此計畫已停用，無法新增使用紀錄");
   if(!state.categories.some(c=>c.active!==false))return toast("此計畫尚未建立可使用的經費項目");
-  $("recordAmount").readOnly=false; $("recordActualAdjustmentWrap").classList.add("hidden");
+  $("recordAmount").readOnly=false; $("recordAmount").style.backgroundColor=""; $("recordAmount").style.color=""; $("recordActualAdjustmentWrap").classList.add("hidden");
   $("recordForm").reset(); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄";
   renderRecordOwnerOptions(state.user.email.toLowerCase());
   $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; updateRecordRequirements(); $("recordDialog").showModal();
@@ -393,7 +393,9 @@ function openEditRecord(id){
   }else { $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; }
   const linked=!!r.advanceAllocationId;
   $("recordAmount").readOnly=linked;
-  $("recordActualAdjustmentWrap").classList.toggle("hidden",!linked);
+  $("recordAmount").style.backgroundColor=linked?"#e5e7eb":"";
+  $("recordAmount").style.color=linked?"#6b7280":"";
+  $("recordActualAdjustmentWrap").classList.add("hidden");
   $("recordProposedActualAmount").value=r.actualAdjustment?.status==="rejected"?r.actualAdjustment.amount:"";
   $("recordAdjustmentReason").value=r.actualAdjustment?.status==="rejected"?r.actualAdjustment.reason:"";
   $("recordProposedActualAmount").disabled=r.actualAdjustment?.status==="pending";
@@ -444,12 +446,11 @@ async function saveRecord(e){
   if(existing&&!isManager()&&existing.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
   const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;
   const linked=!!existing?.advanceAllocationId;
-  if(linked&&existing.actualAdjustment?.status==="pending")return toast("實際金額申請待管理員確認，暫時不能修改此筆紀錄");
   if(linked&&categoryId!==existing.categoryId)return toast("已分配經費項目鎖定");
   if(linked&&semester!==existing.semester)return toast("已分配學期鎖定");
   if(linked&&amount!==Number(existing.amount||0))return toast("已分配金額鎖定，請填寫實際金額申請");
   const proposedRaw=$("recordProposedActualAmount").value.trim();
-  const submitting=linked&&proposedRaw!=="";
+  const submitting=false;
   if(linked&&!existing.estimated&&estimated)return toast("已確認實際金額，不能改回預估");
   const proposedAmount=Number(proposedRaw),reason=$("recordAdjustmentReason").value.trim();
   if(submitting&&existing.actualAdjustment?.status==="pending")return toast("已有申請待管理員確認");
