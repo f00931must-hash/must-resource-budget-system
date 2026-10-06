@@ -150,6 +150,7 @@ async function saveLink(e){
     const bid=batchId(),p=planId();
     if(!bid||!p)throw new Error("請先選擇預支批次");
     const editId=$("advanceExistingAllocationId").value;
+    if(editId)throw new Error("已分配金額鎖定，請改走實際金額申請流程");
     if(editId){
       const aSnap=await getDoc(doc(db,"advanceAllocations",editId));
       if(!aSnap.exists()||aSnap.data().deleted===true)throw new Error("找不到此活動分配");
