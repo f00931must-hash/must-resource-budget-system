@@ -1,4 +1,4 @@
-import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.1.0";
+import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.2.0";
 // Teacher own advance allocation view v1.7.6
 // All enabled users, including managers, see only their own allocations here
 // and can perform one action: confirm receipt of the allocated amount.
