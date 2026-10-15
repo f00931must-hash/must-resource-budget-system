@@ -1,4 +1,4 @@
-import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.1.0";
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.2.0";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
