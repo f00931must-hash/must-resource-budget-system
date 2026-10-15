@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCsApWkpnJiwCsQsiPK14pgFQdqb88UJjQ",
@@ -329,6 +329,7 @@ function renderCategoryAdmin(){
       <div><small>編列額度</small><strong>${money.format(c.budget||0)}</strong></div>
       <div><small>已核銷</small><strong>${money.format(approvedTotal(recs))}</strong></div>
       <div><small>待核對＋預估</small><strong>${money.format(pendingTotal(recs)+estimatedTotal(recs))}</strong></div>
+      <div><small>剩餘金額</small><strong style="color:${Number(c.budget||0)-recs.reduce((s,r)=>s+Number(r.amount||0),0)<0?'#b42318':'inherit'}">${money.format(Number(c.budget||0)-recs.reduce((s,r)=>s+Number(r.amount||0),0))}</strong></div>
       <div><button class="link-btn" data-edit-category="${c.id}">調整</button> <button class="link-btn danger" data-delete-category="${c.id}">刪除</button></div>
     </div>`;
   }).join("");
@@ -467,7 +468,7 @@ async function saveRecord(e){
   const cat=state.categories.find(c=>c.id===categoryId); if(!cat)return toast("請選擇經費項目");
   if(!/^\d{3}-[12]$/.test(semester))return toast("學期請輸入例如 114-2、115-1");
   const other=state.records.filter(r=>r.categoryId===categoryId&&r.id!==id).reduce((s,r)=>s+Number(r.amount||0),0);
-  if(other+amount>Number(cat.budget||0))return toast(`此筆會超過「${cat.name}」編列額度`,5000);
+  // 剩餘額度可為負數，仍允許登錄支出。
   const file=$("recordVoucherFile").files?.[0]||null, oldUrl=existing?.voucherUrl||existing?.folderUrl||"";
   if(file&&file.size>20*1024*1024)return toast("核銷單據檔案不可超過 20 MB",5000);
   if(submitting){
@@ -859,7 +860,7 @@ async function saveCategory(e){
   const old=id?state.categories.find(x=>x.id===id):null, budget=Number($("categoryBudget").value||0), other=state.categories.filter(c=>c.id!==id).reduce((s,c)=>s+Number(c.budget||0),0);
   if(other+budget>planTotal())return toast("編列總額不可超過計畫總額",5000);
   const used=id?state.records.filter(r=>r.categoryId===id).reduce((s,r)=>s+Number(r.amount||0),0):0;
-  if(budget<used)return toast("編列額度不可低於已登錄金額",5000);
+  if(!Number.isSafeInteger(budget)||budget<0)return toast("編列額度須為非負整數",5000);
   const data={planId:state.activePlanId,name:$("categoryName").value.trim(),budget,order:Number($("categoryOrder").value||0),active:$("categoryActive").checked,updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()};
   try{
     let targetId=id;
@@ -893,3 +894,80 @@ window.addEventListener("budget-settlement-refresh",async()=>{
   try{await loadPlanData();renderAll();}
   catch(err){console.warn("refresh records after advance change failed",err);}
 });
+
+// 編列轉移及調整紀錄，僅管理員可操作。
+const adjustmentHead=$('newCategoryBtn').parentElement;
+const adjustmentTools=document.createElement('div');
+adjustmentTools.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+adjustmentHead.insertBefore(adjustmentTools,$('newCategoryBtn'));
+adjustmentTools.innerHTML='<button type="button" id="budgetHistoryBtn" class="ghost-btn">調整紀錄</button><button type="button" id="budgetTransferBtn" class="ghost-btn">轉移編列金額</button>';
+adjustmentTools.append($('newCategoryBtn'));
+const adjustmentDialog=document.createElement('dialog');
+adjustmentDialog.innerHTML='<div class="dialog-form"><div class="dialog-head"><h3 id="adjustmentTitle"></h3><button type="button" class="icon-btn" id="adjustmentClose">×</button></div><div id="adjustmentBody"></div></div>';
+document.body.append(adjustmentDialog);
+$('adjustmentClose').onclick=()=>adjustmentDialog.close();
+$('budgetTransferBtn').onclick=()=>{
+  if(!isManager()||!state.activePlanId||!isPlanActive())return toast('請選擇啟用中的計畫');
+  const planId=state.activePlanId;
+  const opts=state.categories.filter(c=>c.active!==false).map(c=>`<option value="${esc(c.id)}">${esc(c.name)}（編列 ${money.format(c.budget||0)}）</option>`).join('');
+  $('adjustmentTitle').textContent='轉移編列金額';
+  $('adjustmentBody').innerHTML=`<form id="transferBudgetForm"><label>撥出項目（編列減少）<select id="transferFrom" required>${opts}</select></label><label>撥入項目（編列增加）<select id="transferTo" required>${opts}</select></label><label>轉移金額<input id="transferAmount" type="number" min="1" step="1" required></label><label>備註<textarea id="transferReason" maxlength="300"></textarea></label><p class="hint">例如：活動費撥出 7,000 元給會議費。計畫總編列不變，原使用紀錄及預支分配不變。</p><div id="transferPreview" class="hint"></div><button class="primary-btn" id="transferSave">確認轉移</button></form>`;
+  const preview=()=>{
+    const from=state.categories.find(c=>c.id===$('transferFrom').value),to=state.categories.find(c=>c.id===$('transferTo').value),amount=Number($('transferAmount').value);
+    const remain=c=>Number(c.budget||0)-state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+Number(r.amount||0),0);
+    $('transferPreview').textContent=from&&to&&amount>0?`${from.name}：編列 ${money.format(Number(from.budget||0)-amount)}，剩餘 ${money.format(remain(from)-amount)}；${to.name}：編列 ${money.format(Number(to.budget||0)+amount)}，剩餘 ${money.format(remain(to)+amount)}`:'';
+  };
+  $('transferBudgetForm').oninput=preview;
+  $('transferBudgetForm').onsubmit=async e=>{
+    e.preventDefault(); const from=$('transferFrom').value,to=$('transferTo').value,amount=Number($('transferAmount').value),reason=$('transferReason').value.trim();
+    if(from===to)return toast('請選擇不同項目');
+    if(!Number.isSafeInteger(amount)||amount<=0)return toast('請輸入正整數金額');
+    if(planId!==state.activePlanId)return toast('計畫已切換，請重新開啟');
+    $('transferSave').disabled=true;
+    try{
+      const actor=state.user.email.toLowerCase(),logRef=doc(collection(db,'auditLogs'));
+      await runTransaction(db,async tx=>{
+        const fromRef=doc(db,'budgetCategories',from),toRef=doc(db,'budgetCategories',to);
+        const p=await tx.get(doc(db,'budgetPlans',planId)),f=await tx.get(fromRef),t=await tx.get(toRef);
+        if(!p.exists()||p.data().active===false||p.data().deleted===true)throw Error('計畫已停用或刪除');
+        if(!f.exists()||!t.exists())throw Error('項目已不存在');
+        const a=f.data(),b=t.data();
+        if(a.planId!==planId||b.planId!==planId||a.deleted===true||b.deleted===true||a.active===false||b.active===false)throw Error('項目已變更，請重新操作');
+        const av=Number(a.budget||0),bv=Number(b.budget||0);
+        if(amount>av)throw Error('撥出金額不可超過該項目的編列額度');
+        if(!Number.isSafeInteger(av-amount)||!Number.isSafeInteger(bv+amount))throw Error('金額超出可計算範圍');
+        const stamp={updatedAt:serverTimestamp(),updatedBy:actor};
+        tx.update(fromRef,{budget:av-amount,...stamp});tx.update(toRef,{budget:bv+amount,...stamp});
+        tx.set(logRef,{type:'budget-transfer',action:'transfer',planId,fromId:from,toId:to,fromName:a.name||'',toName:b.name||'',amount,before:{fromBudget:av,toBudget:bv},after:{fromBudget:av-amount,toBudget:bv+amount},reason,actorEmail:actor,createdAt:serverTimestamp()});
+      });
+      adjustmentDialog.close();await loadPlanData();renderAll();toast('編列金額已轉移');
+    }catch(err){toast('轉移失敗：'+err.message,6000);}finally{if($('transferSave'))$('transferSave').disabled=false;}
+  };
+  adjustmentDialog.showModal();
+};
+$('budgetHistoryBtn').onclick=async()=>{
+  if(!isManager()||!state.activePlanId)return toast('請先選擇計畫');
+  const planId=state.activePlanId,planName=currentPlan()?.name||'計畫';
+  $('adjustmentTitle').textContent='調整紀錄';$('adjustmentBody').textContent='載入中…';adjustmentDialog.showModal();
+  try{
+    const snap=await getDocs(query(collection(db,'auditLogs'),where('planId','==',planId)));
+    const logs=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>['budget-category','budget-transfer'].includes(x.type)).sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0));
+    const rows=logs.map(x=>{
+      const time=x.createdAt?.toDate?.().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})||'';
+      if(x.type==='budget-transfer')return [time,'轉移編列',x.fromName,x.toName,Number(x.amount||0),Number(x.before?.fromBudget||0),Number(x.after?.fromBudget||0),Number(x.before?.toBudget||0),Number(x.after?.toBudget||0),x.actorEmail||'',x.reason||''];
+      return [time,x.action==='create'?'新增項目':'調整項目',x.after?.name||x.before?.name||'', '',Number(x.after?.budget||0)-Number(x.before?.budget||0),Number(x.before?.budget||0),Number(x.after?.budget||0),'','',x.actorEmail||'',x.reason||''];
+    });
+    const headers=['時間','操作','項目／撥出','撥入項目','金額／差額','原編列','新編列','撥入原編列','撥入新編列','操作人','備註'];
+    $('adjustmentBody').innerHTML=`<button type="button" class="ghost-btn" id="exportAdjustments">匯出 Excel</button><div style="overflow:auto;max-height:60vh"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>${rows.length?'':'<p>目前沒有調整紀錄。</p>'}</div>`;
+    $('exportAdjustments').onclick=async()=>{
+      try{
+        const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('編列調整紀錄');
+        ws.addRow(headers);rows.forEach(row=>ws.addRow(row));ws.views=[{state:'frozen',ySplit:1}];ws.autoFilter={from:'A1',to:'K1'};
+        ws.columns.forEach((col,i)=>col.width=[24,16,24,24,18,18,18,18,18,34,40][i]);
+        ws.eachRow((row,n)=>{row.eachCell(cell=>{cell.font={name:'微軟正黑體',size:11,color:{argb:n===1?'FFFFFFFF':'FF243B53'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:n===1?'FF7852A5':n%2?'FFF3EEF8':'FFFFFFFF'}};cell.alignment={vertical:'middle',wrapText:true};});row.height=n===1?30:36;});
+        for(let col=5;col<=9;col++)ws.getColumn(col).numFmt='#,##0;[Red]-#,##0';
+        const url=URL.createObjectURL(new Blob([await wb.xlsx.writeBuffer()],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),a=document.createElement('a');a.href=url;a.download=planName.replace(/[\\/:*?"<>|]/g,'_')+'_編列調整紀錄.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }catch(err){toast('匯出失敗：'+err.message,6000);}
+    };
+  }catch(err){$('adjustmentBody').textContent='讀取失敗：'+err.message;}
+};
