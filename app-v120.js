@@ -954,8 +954,8 @@ $('budgetHistoryBtn').onclick=async()=>{
     const logs=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>['budget-category','budget-transfer'].includes(x.type)).sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0));
     const rows=logs.map(x=>{
       const time=x.createdAt?.toDate?.().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})||'';
-      if(x.type==='budget-transfer')return [time,'轉移編列',x.fromName,x.toName,Number(x.amount||0),Number(x.before?.fromBudget||0),Number(x.after?.fromBudget||0),Number(x.before?.toBudget||0),Number(x.after?.toBudget||0),x.actorEmail||'',x.reason||''];
-      return [time,x.action==='create'?'新增項目':'調整項目',x.after?.name||x.before?.name||'', '',Number(x.after?.budget||0)-Number(x.before?.budget||0),Number(x.before?.budget||0),Number(x.after?.budget||0),'','',x.actorEmail||'',x.reason||''];
+      if(x.type==='budget-transfer')return [time,'轉移編列',x.fromName,x.toName,Number(x.amount||0),Number(x.before?.fromBudget||0),Number(x.after?.fromBudget||0),Number(x.before?.toBudget||0),Number(x.after?.toBudget||0),budgetUserName(x.actorEmail,x.actorName||'未設定姓名'),x.reason||''];
+      return [time,x.action==='create'?'新增項目':'調整項目',x.after?.name||x.before?.name||'', '',Number(x.after?.budget||0)-Number(x.before?.budget||0),Number(x.before?.budget||0),Number(x.after?.budget||0),'','',budgetUserName(x.actorEmail,x.actorName||'未設定姓名'),x.reason||''];
     });
     const headers=['時間','操作','項目／撥出','撥入項目','金額／差額','原編列','新編列','撥入原編列','撥入新編列','操作人','備註'];
     $('adjustmentBody').innerHTML=`<button type="button" class="ghost-btn" id="exportAdjustments">匯出 Excel</button><div style="overflow:auto;max-height:60vh"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>${rows.length?'':'<p>目前沒有調整紀錄。</p>'}</div>`;
