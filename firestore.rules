@@ -151,24 +151,28 @@ service cloud.firestore {
     }
     function teacherRefundReport() {
       return enabledUser() && resource.data.ownerEmail == email()
-        && resource.data.get('refundReported', false) == false
-        && resource.data.get('refundReceivedConfirmed', false) == false
+        && (resource.data.get('refundReported', false) == false || resource.data.get('refundReceivedConfirmed', false) == true)
+        && request.resource.data.get('refundReceivedConfirmed', true) == false
+        && request.resource.data.get('refundConfirmedTotal', -1) == resource.data.get('refundConfirmedTotal', resource.data.get('refundReceivedConfirmed', false) == true ? resource.data.get('refundAmount', 0) : 0)
+        && request.resource.data.refundAmount > request.resource.data.refundConfirmedTotal
         && request.resource.data.refundReported == true
         && request.resource.data.refundReportedBy == email()
         && request.resource.data.refundReportedAt == request.time
         && refundOwed()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'refundReported','refundAmount','refundReportedBy','refundReportedAt','updatedAt','updatedBy'
+          'refundReported','refundAmount','refundReportedBy','refundReportedAt','refundReceivedConfirmed','refundConfirmedTotal','updatedAt','updatedBy'
         ]);
     }
     function refundReceiptProtected() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['refundReceivedConfirmed','refundReceivedBy','refundReceivedAt'])
+      return teacherRefundReport()
+        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['refundReceivedConfirmed','refundReceivedBy','refundReceivedAt','refundConfirmedTotal','refundHistory'])
         || (manager() && resource.data.get('refundReported', false) == true
           && resource.data.get('refundReceivedConfirmed', false) == false
           && request.resource.data.refundReceivedConfirmed == true
           && request.resource.data.refundReceivedBy == email()
           && request.resource.data.refundReceivedAt == request.time
-          && request.resource.data.refundAmount == resource.data.refundAmount && refundOwed()
+          && request.resource.data.refundAmount == resource.data.refundAmount
+          && request.resource.data.get('refundConfirmedTotal', -1) == resource.data.refundAmount && refundOwed()
           && getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.amount == resource.data.estimatedAmount - resource.data.refundAmount);
     }
 
