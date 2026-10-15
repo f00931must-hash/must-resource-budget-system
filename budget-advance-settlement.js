@@ -4,13 +4,15 @@ import {getFirestore,doc,getDoc,runTransaction,serverTimestamp} from "https://ww
 const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0});
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 export function refundDue(a,r){return a.refundReported===true?Number(a.refundAmount||0):0;}
-export function confirmedRefund(a,r){return a.refundReceivedConfirmed===true&&r&&Number(r.amount)===Number(a.estimatedAmount)-Number(a.refundAmount)&&Number(a.refundAmount)>0?Number(a.refundAmount):0;}
+function refunded(a){return Number(a.refundConfirmedTotal ?? (a.refundReceivedConfirmed===true?a.refundAmount:0))||0;}
+export function confirmedRefund(a,r){const total=refunded(a);return r&&Number(r.amount)===Number(a.estimatedAmount)-total?total:0;}
 export function settlementMarkup(a,r,manager=false){
  if(!r||a.allocationReceivedConfirmed!==true)return "";
- if(a.refundReceivedConfirmed===true)return '<small style="display:block">✓ 已收到退款 '+money.format(a.refundAmount)+'</small>';
- if(a.refundReported===true)return '<div style="margin-top:8px"><strong>申報退款 '+money.format(a.refundAmount)+'</strong><small style="display:block">待管理員確認收到</small>'+(manager?'<button class="primary-btn" data-settlement-action="receive" data-allocation="'+esc(a.id)+'">確認收到退款</button>':'')+'</div>';
- if(manager)return "";
- return '<div style="margin-top:8px"><input type="number" min="1" max="'+Number(a.estimatedAmount||0)+'" step="1" data-refund-amount="'+esc(a.id)+'" aria-label="退款金額" placeholder="輸入退款金額" style="max-width:150px"><button class="primary-btn" data-settlement-action="report" data-allocation="'+esc(a.id)+'">申報退款</button></div>';
+ const total=refunded(a),left=Number(a.estimatedAmount||0)-total;
+ let html=total>0?'<small style="display:block">✓ 累積已退款 '+money.format(total)+'</small>':"";
+ if(a.refundReported===true&&a.refundReceivedConfirmed!==true)return html+'<div style="margin-top:8px"><strong>本次申報退款 '+money.format(Number(a.refundAmount)-total)+'</strong><small style="display:block">待管理員確認收到</small>'+(manager?'<button class="primary-btn" data-settlement-action="receive" data-allocation="'+esc(a.id)+'">確認收到退款</button>':'')+'</div>';
+ if(manager||left<=0)return html;
+ return html+'<div style="margin-top:8px"><input type="number" min="1" max="'+left+'" step="1" data-refund-amount="'+esc(a.id)+'" aria-label="本次退款金額" placeholder="本次退款金額" style="max-width:150px"><button class="primary-btn" data-settlement-action="report" data-allocation="'+esc(a.id)+'">'+(total>0?'追加退款':'申報退款')+'</button></div>';
 }
 let busy=false;
 export async function settlementAction(button){
@@ -36,14 +38,19 @@ export async function settlementAction(button){
  const r=rs.data();if(r.deleted===true||r.advanceAllocationId!==id)throw Error("連結已變更，請重新整理");
  const now=serverTimestamp(),stamp={updatedAt:now,updatedBy:email};
  if(action==="report"){
- if(String(a.ownerEmail||"").toLowerCase()!==email||a.refundReported===true||a.refundReceivedConfirmed===true)throw Error("不能重複申報此筆退款");
- if(amount>Number(a.estimatedAmount))throw Error("退款不可超過原分配金額");
- tx.update(ar,{refundReported:true,refundAmount:amount,refundReportedBy:email,refundReportedAt:now,...stamp});
+ if(String(a.ownerEmail||"").toLowerCase()!==email||(a.refundReported===true&&a.refundReceivedConfirmed!==true))throw Error("不能重複申報此筆退款");
+ const previous=refunded(a); if(amount>Number(a.estimatedAmount)-previous)throw Error("累積退款不可超過原分配金額");
+ if(Number(r.amount)!==Number(a.estimatedAmount)-previous)throw Error("使用紀錄金額與退款紀錄不符，請管理員確認");
+ tx.update(ar,{refundReported:true,refundReceivedConfirmed:false,refundConfirmedTotal:previous,refundAmount:previous+amount,refundReportedBy:email,refundReportedAt:now,...stamp});
  }else{
- const refund=Number(a.refundAmount),remaining=Number(a.estimatedAmount)-refund;
+ const previous=refunded(a),refund=Number(a.refundAmount),remaining=Number(a.estimatedAmount)-refund;
+ if(refund<=previous||Number(r.amount)!==Number(a.estimatedAmount)-previous)throw Error("退款金額或使用紀錄已變更");
  if(a.refundReported!==true||a.refundReceivedConfirmed===true||!Number.isInteger(refund)||refund<=0||remaining<0)throw Error("退款已處理或金額不正確");
  tx.update(rr,{amount:remaining,refundAdjustment:{allocationId:id,originalAmount:Number(a.estimatedAmount),refundAmount:refund,remainingAmount:remaining,confirmedBy:email,confirmedAt:now},...(r.actualAdjustment?.status==="pending"?{actualAdjustment:{...r.actualAdjustment,status:"cancelled",reviewedBy:email,reviewedAt:now}}:{}),...stamp});
- tx.update(ar,{refundReceivedConfirmed:true,refundReceivedBy:email,refundReceivedAt:now,settlementAmount:remaining,...stamp});
+ const history={...(a.refundHistory||{})};
+ if(previous>0&&!Object.keys(history).length)history.legacy={amount:previous,total:previous,confirmedBy:a.refundReceivedBy||"",confirmedAt:a.refundReceivedAt||null};
+ history["receipt_"+(Object.keys(history).length+1)]={amount:refund-previous,total:refund,requestedBy:a.refundReportedBy||"",requestedAt:a.refundReportedAt||null,confirmedBy:email,confirmedAt:now};
+ tx.update(ar,{refundConfirmedTotal:refund,refundHistory:history,refundReceivedConfirmed:true,refundReceivedBy:email,refundReceivedAt:now,settlementAmount:remaining,...stamp});
  }
  });
  window.dispatchEvent(new Event("budget-advance-refresh"));
