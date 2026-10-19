@@ -79,7 +79,7 @@ onAuthStateChanged(auth, async user=>{
     if(state.profile?.role==="manager") await loadBudgetUsers();
     $("userName").textContent=state.profile.name||user.displayName||user.email;
     $("userEmail").textContent=user.email;
-    $("roleBadge").textContent=isManager()?"經費管理員":"經費使用者";
+    $("roleBadge").textContent=isManager()?"經費管理員":state.profile?.role==="advance"?"預支承辦人":"經費使用者";
     document.querySelectorAll(".manager-only").forEach(el=>el.classList.toggle("hidden",!isManager()));
     $("recordsHint").textContent="所有已授權老師都可查看全部使用紀錄；待核對資料可由本人修改，管理員核對完成後即鎖定。";
     $("loginView").classList.add("hidden");
@@ -971,3 +971,4 @@ $('budgetHistoryBtn').onclick=async()=>{
     };
   }catch(err){$('adjustmentBody').textContent='讀取失敗：'+err.message;}
 };
+
