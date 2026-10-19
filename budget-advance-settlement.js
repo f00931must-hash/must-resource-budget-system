@@ -6,11 +6,17 @@ const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 export function refundDue(a,r){return a.refundReported===true?Number(a.refundAmount||0):0;}
 function refunded(a){return Number(a.refundConfirmedTotal ?? (a.refundReceivedConfirmed===true?a.refundAmount:0))||0;}
 export function confirmedRefund(a,r){const total=refunded(a);return r&&Number(r.amount)===Number(a.estimatedAmount)-total?total:0;}
-export function settlementMarkup(a,r,manager=false){
+export function settlementMarkup(a,r,manager=false,selfManage=false){
  if(!r||a.allocationReceivedConfirmed!==true)return "";
  const total=refunded(a),left=Number(a.estimatedAmount||0)-total;
  let html=total>0?'<small style="display:block">✓ 累積已退款 '+money.format(total)+'</small>':"";
- if(a.refundReported===true&&a.refundReceivedConfirmed!==true)return html+'<div style="margin-top:8px"><strong>本次申報退款 '+money.format(Number(a.refundAmount)-total)+'</strong><small style="display:block">待管理員確認收到</small>'+(manager?'<button class="primary-btn" data-settlement-action="receive" data-allocation="'+esc(a.id)+'">確認收到退款</button>':'')+'</div>';
+ const history=Object.values(a.refundHistory||{});
+ if(history.length)html+='<details style="margin-top:6px"><summary>退款紀錄</summary>'+history.map(h=>{
+  const time=h.confirmedAt?.toDate?.()?.toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})||'';
+  return '<small style="display:block">'+esc(time)+'　'+money.format(h.amount||0)+'（累積 '+money.format(h.total||0)+'）</small>';
+ }).join('')+'</details>';
+
+ if(a.refundReported===true&&a.refundReceivedConfirmed!==true)return html+'<div style="margin-top:8px"><strong>本次申報退款 '+money.format(Number(a.refundAmount)-total)+'</strong><small style="display:block">待管理員確認收到</small>'+(manager||selfManage?'<button class="primary-btn" data-settlement-action="receive" data-allocation="'+esc(a.id)+'">確認收到退款</button>':'')+'</div>';
  if(manager||left<=0)return html;
  return html+'<div style="margin-top:8px"><input type="number" min="1" max="'+left+'" step="1" data-refund-amount="'+esc(a.id)+'" aria-label="本次退款金額" placeholder="本次退款金額" style="max-width:150px"><button class="primary-btn" data-settlement-action="report" data-allocation="'+esc(a.id)+'">'+(total>0?'追加退款':'申報退款')+'</button></div>';
 }
@@ -22,7 +28,8 @@ export async function settlementAction(button){
  const action=button.dataset.settlementAction,id=button.dataset.allocation;
  const me=await getDoc(doc(db,"users",email));if(!me.exists()||me.data().enabled!==true)throw Error("帳號未啟用");
  const manager=me.data().role==="manager";
- if(action==="receive"&&!manager)throw Error("僅管理員可以確認");
+ const ownOnly=me.data().role==="advance";
+ if(action==="receive"&&!manager&&!ownOnly)throw Error("僅管理員或本人預支承辦人可以確認");
  if(!["report","receive"].includes(action))throw Error("請重新整理使用新版退款流程");
  const input=button.parentElement?.querySelector("[data-refund-amount]");
  const amount=Number(input?.value);
@@ -35,6 +42,7 @@ export async function settlementAction(button){
  const as=await tx.get(ar);if(!as.exists())throw Error("找不到分配紀錄");
  const a=as.data();if(a.deleted===true||a.allocationReceivedConfirmed!==true)throw Error("分配已移除或尚未確認領款");
  const rr=doc(db,"expenseRecords",a.expenseRecordId),rs=await tx.get(rr);if(!rs.exists())throw Error("找不到使用紀錄");
+ if(action==="receive"&&ownOnly&&a.ownerEmail!==email)throw Error("只能確認自己的退款");
  const r=rs.data();if(r.deleted===true||r.advanceAllocationId!==id)throw Error("連結已變更，請重新整理");
  const now=serverTimestamp(),stamp={updatedAt:now,updatedBy:email};
  if(action==="report"){
@@ -58,3 +66,4 @@ export async function settlementAction(button){
  alert(action==="report"?"已送出退款金額，待管理員確認。":"已確認收到退款，使用紀錄金額已同步更正。請重新整理使用紀錄查看。");
  }finally{busy=false;button.disabled=false;}
 }
+
