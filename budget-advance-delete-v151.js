@@ -10,6 +10,7 @@ import { getFirestore, doc, getDoc, getDocs, collection, query, where, writeBatc
 
 const PROJECT_ID="must-resource-budget-system";
 let auth=null,db=null,currentEmail="",manager=false;
+let ownOnly=false;
 let timer=null,listObserver=null,selectObserver=null;
 let orphanResolveBusy=false;
 
@@ -23,7 +24,8 @@ async function verifyManager(){
   if(!user?.email)throw new Error("尚未登入");
   const email=user.email.toLowerCase();
   const snap=await getDoc(doc(db,"users",email));
-  if(!snap.exists()||snap.data().enabled!==true||snap.data().role!=="manager")throw new Error("此功能僅限經費管理員使用");
+  if(!snap.exists()||snap.data().enabled!==true||!["manager","advance"].includes(snap.data().role))throw new Error("此功能僅限經費管理員使用");
+  ownOnly=snap.data().role==="advance";
   return email;
 }
 
@@ -84,7 +86,7 @@ async function ensureOrphanDeleteButtons(){
 
   orphanResolveBusy=true;
   try{
-    const snap=await getDocs(query(collection(db,"advanceAllocations"),where("batchId","==",bid)));
+    const snap=await getDocs(query(collection(db,"advanceAllocations"),where("batchId","==",bid),...(ownOnly?[where("ownerEmail","==",currentEmail)]:[])));
     const active=snap.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.deleted!==true);
     const used=new Set([...list.querySelectorAll("[data-delete-advance-allocation]")].map(b=>b.dataset.deleteAdvanceAllocation));
 
@@ -137,6 +139,7 @@ async function deleteBatch(){
     const id=currentBatchId(); if(!id)return alert("請先選擇要刪除的預支／動支批次。");
     const b=await getDoc(doc(db,"advanceBatches",id));
     if(!b.exists())return alert("找不到此預支／動支批次。");
+    if(ownOnly&&b.data().handlerEmail!==email)throw Error("只能刪除自己的批次");
     const aSnap=await getDocs(query(collection(db,"advanceAllocations"),where("batchId","==",id)));
     const active=aSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
     if(active.length){
@@ -162,6 +165,7 @@ async function deleteAllocation(id){
     if(!aSnap.exists())return alert("找不到此活動分配。");
     const a={id,...aSnap.data()};
     if(a.deleted===true)return;
+    if(ownOnly){const b=await getDoc(doc(db,"advanceBatches",a.batchId));if(a.ownerEmail!==email||!b.exists()||b.data().handlerEmail!==email)throw Error("只能解除自己的分配");}
 
     let rSnap=null,r=null;
     if(a.expenseRecordId){
@@ -243,7 +247,8 @@ async function init(){
     if(!user?.email)return;
     try{
       const u=await getDoc(doc(db,"users",user.email.toLowerCase()));
-      manager=u.exists()&&u.data().enabled===true&&u.data().role==="manager";
+      manager=u.exists()&&u.data().enabled===true&&["manager","advance"].includes(u.data().role);
+      ownOnly=u.data()?.role==="advance";
       currentEmail=user.email.toLowerCase();
       if(manager){[120,350,700].forEach(ms=>setTimeout(patch,ms));}
     }catch(err){console.warn("advance delete init failed",err);}
@@ -260,3 +265,4 @@ const bootstrapObserver=new MutationObserver(()=>{
 });
 bootstrapObserver.observe(document.body,{childList:true,subtree:true});
 init();
+
