@@ -1,4 +1,4 @@
-import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.2.0";
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.3.0";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
@@ -15,6 +15,7 @@ const PROJECT_ID="must-resource-budget-system";
 const $=id=>document.getElementById(id);
 const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0});
 let auth=null,db=null,currentEmail="";
+let ownOnly=false;
 let users=[],categories=[],batches=[],allocations=[],records=[];
 let activeBatchId="";
 let pendingReceiptTeacher="*";
@@ -58,7 +59,7 @@ function installUI(){
 
   const btn=document.createElement("button");
   btn.id="advanceTab";
-  btn.className="tab manager-only";
+  btn.className="tab";
   btn.dataset.view="advance";
   btn.textContent="預支／動支";
   const trash=nav.querySelector('[data-view="trash"]');
@@ -66,7 +67,7 @@ function installUI(){
 
   const section=document.createElement("section");
   section.id="advance";
-  section.className="view manager-only";
+  section.className="view";
   section.innerHTML=`
     <div class="section-head responsive-head">
       <div><h2>預支／動支</h2><p>管理員建立整筆預支，再將預估金額分配至各老師活動。老師後續在「使用紀錄」轉為實際核銷。</p></div>
@@ -296,6 +297,7 @@ function openBatchDialog(item=null){
     const m=p.match(/(\d{3})/);
     $("advanceBatchSemester").value=m?`${m[1]}-1`:"";
   }
+  if(ownOnly){$("advanceBatchHandler").value=currentEmail;$("advanceBatchHandler").disabled=true;}
   $("advanceBatchDialog").showModal();
 }
 
@@ -323,7 +325,7 @@ async function saveBatch(e){
   const id=$("advanceBatchId").value;
   const categoryIds=selectedBatchCategoryIds();
   const selectedCategories=categoryIds.map(id=>categories.find(c=>c.id===id)).filter(Boolean);
-  const handlerEmail=$("advanceBatchHandler").value;
+  const handlerEmail=ownOnly?currentEmail:$("advanceBatchHandler").value;
   const handler=users.find(u=>u.id===handlerEmail);
   const total=num($("advanceBatchTotal").value);
   const semester=$("advanceBatchSemester").value.trim();
@@ -364,7 +366,7 @@ async function saveAllocation(e){
   if(editId)return alert("已分配金額鎖定，請使用實際金額申請流程。");
   const categoryId=$("advanceAllocationCategory").value;
   const cat=categories.find(c=>c.id===categoryId);
-  const ownerEmail=$("advanceAllocationOwner").value;
+  const ownerEmail=ownOnly?currentEmail:$("advanceAllocationOwner").value;
   const owner=users.find(u=>u.id===ownerEmail);
   const purpose=$("advanceAllocationPurpose").value.trim();
   const estimatedAmount=num($("advanceAllocationAmount").value);
@@ -421,13 +423,13 @@ async function loadAll(){
   const p=planId();
   if(!p){batches=[];allocations=[];records=[];categories=[];render();return;}
   const [uSnap,cSnap,bSnap,aSnap,rSnap]=await Promise.all([
-    getDocs(collection(db,"users")),
+    ownOnly?getDoc(doc(db,"users",currentEmail)):getDocs(collection(db,"users")),
     getDocs(query(collection(db,"budgetCategories"),where("planId","==",p))),
-    getDocs(query(collection(db,"advanceBatches"),where("planId","==",p))),
-    getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p))),
+    getDocs(query(collection(db,"advanceBatches"),where("planId","==",p),...(ownOnly?[where("handlerEmail","==",currentEmail)]:[]))),
+    getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p),...(ownOnly?[where("ownerEmail","==",currentEmail)]:[]))),
     getDocs(query(collection(db,"expenseRecords"),where("planId","==",p)))
   ]);
-  users=uSnap.docs.map(d=>({id:d.id,...d.data()}));
+  users=ownOnly?[{id:currentEmail,...uSnap.data()}]:uSnap.docs.map(d=>({id:d.id,...d.data()}));
   categories=cSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
   batches=bSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
   allocations=aSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
@@ -569,7 +571,8 @@ async function init(){
     currentEmail=user.email.toLowerCase();
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
-      if(!u.exists()||u.data().enabled!==true||u.data().role!=="manager")return;
+      if(!u.exists()||u.data().enabled!==true||!["manager","advance"].includes(u.data().role))return;
+      ownOnly=u.data().role==="advance";
       installUI();
       $("planSelect")?.addEventListener("change",()=>{activeBatchId="";loadAll().catch(showError);});
       await loadAll();
@@ -578,3 +581,4 @@ async function init(){
   });
 }
 init();
+
