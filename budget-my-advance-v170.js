@@ -1,4 +1,4 @@
-import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.2.0";
+import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.3.0";
 // Teacher own advance allocation view v1.7.6
 // All enabled users, including managers, see only their own allocations here
 // and can perform one action: confirm receipt of the allocated amount.
@@ -10,6 +10,7 @@ import { getFirestore, doc, getDoc, getDocs, updateDoc, collection, query, where
 const PROJECT_ID="must-resource-budget-system";
 const $=id=>document.getElementById(id);
 const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0});
+let selfManage=false;
 let auth=null,db=null,currentEmail="",loading=false,receiptBusy=false;
 
 function app(){return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null;}
@@ -64,7 +65,7 @@ async function loadOwn(force=false){
       return `<div style="display:grid;grid-template-columns:minmax(220px,1.8fr) 1fr 1fr auto;gap:14px;align-items:center;padding:16px 0;border-bottom:1px solid #eee">
         <div><strong>${esc(a.purpose||"未填用途")}</strong><small style="display:block;margin-top:5px;color:#777">${esc(b.semester||"未填學期")}｜${esc(a.categoryName||b.categoryName||"預支／動支分配")}</small></div>
         <div><small style="display:block;color:#777">分配金額</small><strong>${money.format(Number(a.estimatedAmount||0))}</strong></div>
-        <div><small style="display:block;color:#777">收款狀態</small><strong>${confirmed?'✅ 已確認收到':'尚未確認'}</strong>${settlementMarkup(a,records.get(a.expenseRecordId),false)}</div>
+        <div><small style="display:block;color:#777">收款狀態</small><strong>${confirmed?'✅ 已確認收到':'尚未確認'}</strong>${settlementMarkup(a,records.get(a.expenseRecordId),false,selfManage)}</div>
         <div>${confirmed?'':`<button class="primary-btn" data-confirm-allocation-receipt="${a.id}">確認收到分配金額</button>`}</div>
       </div>`;
     }).join("");
@@ -109,6 +110,7 @@ async function init(){
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
       if(!u.exists()||u.data().enabled!==true)return;
+      selfManage=u.data().role==="advance";
       installUI();
       $("planSelect")?.addEventListener("change",()=>{if($("myAdvance")?.classList.contains("active-view"))loadOwn().catch(showError);});
     }catch(err){showError(err);}
@@ -116,3 +118,4 @@ async function init(){
 }
 window.addEventListener("budget-settlement-refresh",()=>loadOwn(true).catch(showError));
 init();
+
