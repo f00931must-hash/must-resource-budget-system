@@ -6,13 +6,14 @@ import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, query, where,
-  addDoc, updateDoc, serverTimestamp
+  addDoc, updateDoc, serverTimestamp, runTransaction
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID="must-resource-budget-system";
 const $=id=>document.getElementById(id);
 const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0});
 let auth=null,db=null,currentEmail="",isManager=false;
+let ownOnly=false;
 let dialogInstalled=false;
 let availableRecords=[];
 let currentEditAllocation=null;
@@ -43,7 +44,8 @@ async function verifyManager(){
   if(!user?.email)throw new Error("尚未登入");
   const email=user.email.toLowerCase();
   const snap=await getDoc(doc(db,"users",email));
-  if(!snap.exists()||snap.data().enabled!==true||snap.data().role!=="manager")throw new Error("此功能僅限經費管理員使用");
+  if(!snap.exists()||snap.data().enabled!==true||!["manager","advance"].includes(snap.data().role))throw new Error("此功能僅限經費管理員使用");
+  ownOnly=snap.data().role==="advance";
   return email;
 }
 
@@ -92,15 +94,16 @@ async function loadCandidates(editAllocation=null){
   const bSnap=await getDoc(doc(db,"advanceBatches",bid));
   if(!bSnap.exists()||bSnap.data().deleted===true)throw new Error("找不到目前預支批次");
   const batch={id:bid,...bSnap.data()};
+  if(ownOnly&&batch.handlerEmail!==currentEmail)throw Error("只能處理自己的預支批次");
   const [rSnap,aSnap]=await Promise.all([
     getDocs(query(collection(db,"expenseRecords"),where("planId","==",p))),
-    getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p)))
+    getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p),...(ownOnly?[where("ownerEmail","==",currentEmail)]:[])))
   ]);
   const activeAllocations=aSnap.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.deleted!==true);
   const usedRecordIds=new Set(activeAllocations.filter(a=>!editAllocation||a.id!==editAllocation.id).map(a=>a.expenseRecordId).filter(Boolean));
   const all=rSnap.docs.map(d=>({id:d.id,...d.data()}));
   availableRecords=all.filter(r=>
-    r.deleted!==true &&
+    (!ownOnly||r.ownerEmail===currentEmail) && r.deleted!==true &&
     r.estimated===true &&
     !approved(r) &&
     batchCategoryIds(batch).includes(String(r.categoryId||"")) &&
@@ -173,8 +176,17 @@ async function saveLink(e){
       const bSnap=await getDoc(doc(db,"advanceBatches",bid));
       if(!bSnap.exists()||bSnap.data().deleted===true)throw new Error("找不到目前預支批次");
       const b=bSnap.data();
+      if(ownOnly&&(b.handlerEmail!==email||r.ownerEmail!==email))throw Error("只能分配自己的預估至自己的批次");
       if(!batchCategoryIds(b).includes(String(r.categoryId||""))||r.semester!==b.semester)throw new Error("此預估與目前預支批次的學期或經費科目不一致");
-      const aRef=await addDoc(collection(db,"advanceAllocations"),{
+      const aRef=doc(collection(db,"advanceAllocations"));
+      await runTransaction(db,async tx=>{
+      const latest=await tx.get(doc(db,"expenseRecords",r.id)),bs=await tx.get(doc(db,"advanceBatches",bid));
+      if(!latest.exists()||!bs.exists()||bs.data().deleted===true)throw Error("資料已變更，請重試");
+      const fresh=latest.data();
+      if(fresh.advanceAllocationId||fresh.deleted===true||fresh.estimated!==true||approved(fresh)||Number(fresh.amount)!==num(r.amount))throw Error("預估已變更或已分配，請重新選取");
+      if(fresh.ownerEmail!==r.ownerEmail||fresh.categoryId!==r.categoryId||fresh.planId!==p||fresh.semester!==b.semester)throw Error("預估內容已變更，請重試");
+      if(ownOnly&&(fresh.ownerEmail!==email||bs.data().handlerEmail!==email))throw Error("只能分配自己的紀錄");
+      tx.set(aRef,{
         planId:p,batchId:bid,expenseRecordId:r.id,
         categoryId:r.categoryId||"",categoryName:batchCategoryLabel(b,r.categoryId)||"",
         ownerEmail:r.ownerEmail||"",ownerName:r.ownerName||r.ownerEmail||"",purpose:r.purpose||"",
@@ -182,10 +194,11 @@ async function saveLink(e){
         recordOrigin:"existing-estimate",deleted:false,
         createdAt:serverTimestamp(),createdBy:email,updatedAt:serverTimestamp(),updatedBy:email
       });
-      await updateDoc(doc(db,"expenseRecords",r.id),{
+      tx.update(doc(db,"expenseRecords",r.id),{
         advanceBatchId:bid,advanceAllocationId:aRef.id,advanceLinked:true,
         originalEstimatedAmount:r.originalEstimatedAmount??num(r.amount),
         updatedAt:serverTimestamp(),updatedBy:email
+      });
       });
       await addDoc(collection(db,"auditLogs"),{type:"advance-allocation",targetId:aRef.id,planId:p,action:"link-existing-estimate",expenseRecordId:r.id,actorEmail:email,createdAt:serverTimestamp()});
     }
@@ -222,9 +235,10 @@ async function init(){
     currentEmail=user.email.toLowerCase();
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
-      isManager=u.exists()&&u.data().enabled===true&&u.data().role==="manager";
+      isManager=u.exists()&&u.data().enabled===true&&["manager","advance"].includes(u.data().role);
       if(isManager)installDialog();
     }catch(err){console.warn("advance existing-estimate link init failed",err);}
   });
 }
 init();
+
