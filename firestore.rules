@@ -31,6 +31,26 @@ service cloud.firestore {
         || (enabledUser() && userDoc().data.role == 'manager');
     }
 
+    // 預支承辦人僅可操作本人批次與本人分配，並保留一般使用者權限。
+    function advanceOfficer() {
+      return enabledUser() && userDoc().data.role == 'advance';
+    }
+    function ownBatch(data) {
+      return advanceOfficer() && data.handlerEmail == email();
+    }
+    function ownAllocation(data) {
+      return advanceOfficer() && data.ownerEmail == email()
+        && get(/databases/$(database)/documents/advanceBatches/$(data.batchId)).data.handlerEmail == email();
+    }
+    function refundReviewer(data) {
+      return manager() || (advanceOfficer() && data.ownerEmail == email());
+    }
+    function ownRecordServiceUpdate() {
+      return advanceOfficer() && resource.data.ownerEmail == email()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'amount','refundAdjustment','actualAdjustment','advanceBatchId','advanceAllocationId','advanceLinked','updatedAt','updatedBy'
+        ]) && (refundAmountApproval() || allocationCancellation());
+    }
     function recordLocked() {
       return resource.data.get('reviewStatus', 'pending') == 'approved'
         || resource.data.get('reviewed', false) == true
@@ -88,7 +108,7 @@ service cloud.firestore {
     function refundAmountApproval() {
       let a = get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
       let after = getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
-      return manager() && a.get('refundReported', false) == true
+      return refundReviewer(a) && resource.data.ownerEmail == a.ownerEmail && a.get('refundReported', false) == true
         && a.get('refundReceivedConfirmed', false) == false
         && after.get('refundReceivedConfirmed', false) == true
         && after.refundReceivedBy == email()
@@ -96,7 +116,7 @@ service cloud.firestore {
         && request.resource.data.amount == a.estimatedAmount - a.refundAmount;
     }
     function allocationCancellation() {
-      return manager()
+      return (manager() || (advanceOfficer() && resource.data.ownerEmail == email() && ownAllocation(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data)))
         && request.resource.data.get('advanceAllocationId', '') == ''
         && request.resource.data.amount == resource.data.amount
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.get('deleted', false) == true;
@@ -129,7 +149,7 @@ service cloud.firestore {
           && request.resource.data.estimated == true
           && request.resource.data.amountConfirmed == true && hasVoucher(request.resource.data)
         )
-        || (manager() && before.get('status', '') == 'pending' && (
+        || ((manager() || (advanceOfficer() && resource.data.ownerEmail == email())) && before.get('status', '') == 'pending' && (
           adjustmentApproval()
           || (after.status == 'cancelled' && refundAmountApproval())
           || (after.status == 'rejected' && after.amount == before.amount
@@ -166,7 +186,7 @@ service cloud.firestore {
     function refundReceiptProtected() {
       return teacherRefundReport()
         || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['refundReceivedConfirmed','refundReceivedBy','refundReceivedAt','refundConfirmedTotal','refundHistory'])
-        || (manager() && resource.data.get('refundReported', false) == true
+        || (refundReviewer(resource.data) && resource.data.get('refundReported', false) == true
           && resource.data.get('refundReceivedConfirmed', false) == false
           && request.resource.data.refundReceivedConfirmed == true
           && request.resource.data.refundReceivedBy == email()
@@ -196,20 +216,60 @@ service cloud.firestore {
     // the batch metadata needed to understand their own allocations.
     match /advanceBatches/{batchId} {
       allow read: if enabledUser();
-      allow create, update, delete: if manager();
+      allow create: if manager() || (ownBatch(request.resource.data)
+        && request.resource.data.createdBy == email()
+        && request.resource.data.get('deleted', false) == false);
+      allow update: if manager() || (ownBatch(resource.data) && ownBatch(request.resource.data)
+        && request.resource.data.planId == resource.data.planId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedBy == email());
+      allow delete: if manager();
     }
 
     // Managers manage all allocations. Regular users may read only their own allocation
     // and may only confirm that the allocated amount was received.
     match /advanceAllocations/{allocationId} {
       allow read: if manager()
-        || (enabledUser() && resource.data.ownerEmail == email());
+        || (enabledUser() && resource.data.ownerEmail == email())
+        || (advanceOfficer() && ownBatch(get(/databases/$(database)/documents/advanceBatches/$(resource.data.batchId)).data));
 
-      allow create, delete: if manager();
+      allow create: if manager() || (ownAllocation(request.resource.data)
+        && request.resource.data.keys().hasOnly(['planId','batchId','expenseRecordId','categoryId','categoryName','ownerEmail','ownerName','purpose','estimatedAmount','note','recordOrigin','deleted','createdAt','createdBy','updatedAt','updatedBy'])
+        && request.resource.data.createdBy == email()
+        && request.resource.data.get('deleted', false) == false
+        && request.resource.data.get('allocationReceivedConfirmed', false) == false
+        && request.resource.data.get('refundReported', false) == false
+        && request.resource.data.get('refundReceivedConfirmed', false) == false
+        && request.resource.data.get('refundConfirmedTotal', 0) == 0
+        && request.resource.data.get('refundAmount', 0) == 0
+        && request.resource.data.get('refundHistory', {}) == {}
+        && request.resource.data.estimatedAmount > 0
+        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.ownerEmail == email()
+        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.get('advanceAllocationId', '') == ''
+        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.estimated == true
+        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.get('deleted', false) == false
+        && request.resource.data.planId == get(/databases/$(database)/documents/advanceBatches/$(request.resource.data.batchId)).data.planId
+        && request.resource.data.planId == get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.planId
+        && request.resource.data.categoryId == get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.categoryId
+        && request.resource.data.estimatedAmount == get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.amount
+        && getAfter(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.advanceAllocationId == allocationId);
+      allow delete: if manager();
 
       allow update: if allocationFixed() && refundReceiptProtected() && (
         manager()
         || teacherRefundReport()
+        || (ownAllocation(resource.data)
+          && request.resource.data.get('deleted', false) == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','deletedAt','deletedBy','updatedAt','updatedBy','orphanSourceRemoved'])
+          && request.resource.data.deletedBy == email()
+          && (!exists(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId))
+            || get(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.get('deleted', false) == true
+            || getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.get('advanceAllocationId', '') == ''))
+        || (advanceOfficer() && resource.data.ownerEmail == email()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundConfirmedTotal','refundHistory','refundReceivedConfirmed','refundReceivedBy','refundReceivedAt','settlementAmount','updatedAt','updatedBy'])
+          && resource.data.get('refundReceivedConfirmed', false) == false
+          && request.resource.data.refundReceivedConfirmed == true)
         || (
           enabledUser()
           && resource.data.ownerEmail == email()
@@ -260,7 +320,8 @@ service cloud.firestore {
         );
 
       allow update: if enabledUser() && linkedRecordProtected() && adjustmentProtected()
-        && (manager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
+        && (manager() || ownRecordServiceUpdate() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
+        ownRecordServiceUpdate() ||
         manager()
         || (
           resource.data.ownerEmail == email()
@@ -288,8 +349,15 @@ service cloud.firestore {
 
     match /auditLogs/{logId} {
       allow read: if manager();
-      allow create: if manager();
+      allow create: if manager() || (advanceOfficer()
+        && request.resource.data.actorEmail == email()
+        && request.resource.data.createdAt == request.time
+        && ((request.resource.data.type in ['advance-batch','advance-receipt']
+            && ownBatch(getAfter(/databases/$(database)/documents/advanceBatches/$(request.resource.data.targetId)).data))
+          || (request.resource.data.type == 'advance-allocation'
+            && ownAllocation(getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.targetId)).data))));
       allow update, delete: if false;
     }
   }
 }
+
