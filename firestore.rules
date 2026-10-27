@@ -51,6 +51,113 @@ service cloud.firestore {
           'amount','refundAdjustment','actualAdjustment','advanceBatchId','advanceAllocationId','advanceLinked','updatedAt','updatedBy'
         ]) && (refundAmountApproval() || allocationCancellation());
     }
+    function payoutReviewer(a) {
+      return manager() || (advanceOfficer() && ownAllocation(a));
+    }
+    function payoutParentChange(allocationId) {
+      let a=resource.data;
+      let b=request.resource.data;
+      let pid=b.get('splitMutationId','');
+      let after=getAfter(/databases/$(database)/documents/advancePayouts/$(pid)).data;
+      let existed=exists(/databases/$(database)/documents/advancePayouts/$(pid));
+      let before=existed ? get(/databases/$(database)/documents/advancePayouts/$(pid)).data : {};
+      return enabledUser() && a.get('deleted',false)==false
+        && b.get('payoutSplit',false)==true
+        && a.get('allocationReceivedConfirmed',false)==false
+        && a.get('refundReported',false)==false
+        && b.diff(a).affectedKeys().hasOnly(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients','updatedAt','updatedBy'])
+        && after.allocationId==allocationId
+        && b.splitAssigned>=0 && b.splitAssigned<=a.estimatedAmount
+        && b.splitUnreceived>=0 && b.splitUnreceived<=b.splitAssigned
+        && b.splitRefundTotal>=0 && b.splitRefundTotal<=b.splitAssigned
+        && b.updatedBy==email()
+        && (
+          (!existed && payoutReviewer(a) && after.createdBy==email()
+            && after.amount is int && after.amount>0
+            && b.splitAssigned==a.get('splitAssigned',0)+after.amount
+            && b.splitUnreceived==a.get('splitUnreceived',0)+after.amount
+            && b.splitRefundTotal==a.get('splitRefundTotal',0)
+            && b.splitRecipients.diff(a.get('splitRecipients',{})).affectedKeys().hasOnly([after.ownerEmail])
+            && b.splitRecipients[after.ownerEmail]==true)
+          || (existed && before.get('deleted',false)==false
+            && b.splitRecipients==a.splitRecipients
+            && (
+              (before.ownerEmail==email() && before.receivedConfirmed==false && after.receivedConfirmed==true
+                && after.get('deleted',false)==false
+                && b.splitAssigned==a.splitAssigned && b.splitRefundTotal==a.splitRefundTotal
+                && b.splitUnreceived==a.splitUnreceived-before.amount)
+              || (payoutReviewer(a) && before.receivedConfirmed==false && after.deleted==true
+                && b.splitAssigned==a.splitAssigned-before.amount
+                && b.splitUnreceived==a.splitUnreceived-before.amount
+                && b.splitRefundTotal==a.splitRefundTotal)
+              || (payoutReviewer(a) && before.receivedConfirmed==true && before.refundPending>0
+                && after.refundPending==0 && after.refundTotal==before.refundTotal+before.refundPending
+                && b.splitAssigned==a.splitAssigned && b.splitUnreceived==a.splitUnreceived
+                && b.splitRefundTotal==a.splitRefundTotal+before.refundPending
+                && getAfter(/databases/$(database)/documents/expenseRecords/$(a.expenseRecordId)).data.amount==a.estimatedAmount-b.splitRefundTotal)
+            ))
+        );
+    }
+    function payoutExpenseRefund() {
+      let a=get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
+      let b=getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
+      let p=get(/databases/$(database)/documents/advancePayouts/$(b.splitMutationId)).data;
+      let q=getAfter(/databases/$(database)/documents/advancePayouts/$(b.splitMutationId)).data;
+      return a.get('payoutSplit',false)==true && payoutReviewer(a)
+        && resource.data.amount==a.estimatedAmount-a.splitRefundTotal
+        && p.allocationId==resource.data.advanceAllocationId && p.refundPending>0
+        && q.refundPending==0 && q.refundTotal==p.refundTotal+p.refundPending
+        && b.splitRefundTotal==a.splitRefundTotal+p.refundPending
+        && request.resource.data.amount==a.estimatedAmount-b.splitRefundTotal
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount','updatedAt','updatedBy']);
+    }
+    match /advancePayouts/{payoutId} {
+      allow read: if manager() || (enabledUser() && resource.data.ownerEmail==email())
+        || (advanceOfficer() && resource.data.handlerEmail==email());
+      allow create: if enabledUser()
+        && request.resource.data.keys().hasOnly(['allocationId','expenseRecordId','batchId','planId','handlerEmail','ownerEmail','ownerName','purpose','categoryName','amount','receivedConfirmed','refundTotal','refundPending','deleted','createdBy','createdAt','updatedAt','updatedBy'])
+        && request.resource.data.createdBy==email() && request.resource.data.createdAt==request.time
+        && request.resource.data.amount is int && request.resource.data.amount>0
+        && request.resource.data.receivedConfirmed==false && request.resource.data.refundTotal==0
+        && request.resource.data.refundPending==0 && request.resource.data.deleted==false
+        && get(/databases/$(database)/documents/users/$(request.resource.data.ownerEmail)).data.enabled==true
+        && request.resource.data.planId==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.planId
+        && request.resource.data.batchId==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.batchId
+        && request.resource.data.expenseRecordId==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.expenseRecordId
+        && request.resource.data.handlerEmail==get(/databases/$(database)/documents/advanceBatches/$(request.resource.data.batchId)).data.handlerEmail
+        && payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data)
+        && getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.splitMutationId==payoutId
+        && getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.splitAssigned==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.get('splitAssigned',0)+request.resource.data.amount;
+      allow update: if enabledUser() && resource.data.deleted==false
+        && get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.get('deleted',false)==false
+        && request.resource.data.updatedBy==email()
+        && (
+          (resource.data.ownerEmail==email() && resource.data.receivedConfirmed==false && request.resource.data.receivedConfirmed==true
+            && request.resource.data.receivedBy==email() && request.resource.data.receivedAt==request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receivedConfirmed','receivedBy','receivedAt','updatedAt','updatedBy'])
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitUnreceived==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitUnreceived-resource.data.amount)
+          || (resource.data.ownerEmail==email() && resource.data.receivedConfirmed==true && resource.data.refundPending==0
+            && request.resource.data.refundPending is int && request.resource.data.refundPending>0
+            && request.resource.data.refundPending<=resource.data.amount-resource.data.refundTotal
+            && request.resource.data.refundReportedBy==email() && request.resource.data.refundReportedAt==request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundPending','refundReportedBy','refundReportedAt','updatedAt','updatedBy']))
+          || (payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data)
+            && resource.data.receivedConfirmed==false && request.resource.data.deleted==true
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','updatedAt','updatedBy'])
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitAssigned==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitAssigned-resource.data.amount)
+          || (payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data)
+            && resource.data.receivedConfirmed==true && resource.data.refundPending>0
+            && request.resource.data.refundPending==0 && request.resource.data.refundTotal==resource.data.refundTotal+resource.data.refundPending
+            && request.resource.data.refundReceivedBy==email() && request.resource.data.refundReceivedAt==request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundTotal','refundPending','refundHistory','refundReceivedBy','refundReceivedAt','updatedAt','updatedBy'])
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitRefundTotal==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitRefundTotal+resource.data.refundPending)
+        );
+      allow delete: if false;
+    }
+
     function recordLocked() {
       return resource.data.get('reviewStatus', 'pending') == 'approved'
         || resource.data.get('reviewed', false) == true
@@ -129,7 +236,7 @@ service cloud.firestore {
         && request.resource.data.categoryId == resource.data.categoryId
         && request.resource.data.semester == resource.data.semester
         && request.resource.data.get('originalEstimatedAmount', 0) == resource.data.get('originalEstimatedAmount', 0)
-        && (request.resource.data.amount == resource.data.amount || adjustmentApproval() || refundAmountApproval())
+        && (request.resource.data.amount == resource.data.amount || adjustmentApproval() || refundAmountApproval() || payoutExpenseRefund())
         && (request.resource.data.get('estimated', false) == resource.data.get('estimated', false) || adjustmentApproval() || (request.resource.data.get('estimated', true) == false && amountConfirmed(request.resource.data) && hasVoucher(request.resource.data) && request.resource.data.get('archived', false) == true))
       );
     }
@@ -197,7 +304,7 @@ service cloud.firestore {
     }
 
     match /users/{userEmail} {
-      allow read: if manager()
+      allow read: if manager() || advanceOfficer()
         || (enabledUser() && userEmail == email());
       allow create, update, delete: if manager();
     }
@@ -232,7 +339,8 @@ service cloud.firestore {
     match /advanceAllocations/{allocationId} {
       allow read: if manager()
         || (enabledUser() && resource.data.ownerEmail == email())
-        || (advanceOfficer() && ownBatch(get(/databases/$(database)/documents/advanceBatches/$(resource.data.batchId)).data));
+        || (advanceOfficer() && ownBatch(get(/databases/$(database)/documents/advanceBatches/$(resource.data.batchId)).data))
+        || (enabledUser() && resource.data.get('splitRecipients',{}).get(email(),false)==true);
 
       allow create: if manager() || (ownAllocation(request.resource.data)
         && request.resource.data.keys().hasOnly(['planId','batchId','expenseRecordId','categoryId','categoryName','ownerEmail','ownerName','purpose','estimatedAmount','note','recordOrigin','deleted','createdAt','createdBy','updatedAt','updatedBy'])
@@ -256,7 +364,9 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.advanceAllocationId == allocationId);
       allow delete: if manager();
 
-      allow update: if allocationFixed() && refundReceiptProtected() && (
+      allow update: if allocationFixed() && refundReceiptProtected()
+        && (request.resource.data.get('deleted',false)!=true || resource.data.get('splitAssigned',0)==0) && (
+        (request.resource.data.get('payoutSplit',false)==true && payoutParentChange(allocationId)) ||
         manager()
         || teacherRefundReport()
         || (ownAllocation(resource.data)
@@ -274,6 +384,7 @@ service cloud.firestore {
           enabledUser()
           && resource.data.ownerEmail == email()
           && resource.data.get('allocationReceivedConfirmed', false) == false
+          && resource.data.get('payoutSplit',false)==false
           && request.resource.data.ownerEmail == resource.data.ownerEmail
           && request.resource.data.get('allocationReceivedConfirmed', false) == true
           && request.resource.data.get('allocationReceivedBy', '') == email()
@@ -320,8 +431,8 @@ service cloud.firestore {
         );
 
       allow update: if enabledUser() && linkedRecordProtected() && adjustmentProtected()
-        && (manager() || ownRecordServiceUpdate() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
-        ownRecordServiceUpdate() ||
+        && (manager() || ownRecordServiceUpdate() || payoutExpenseRefund() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
+        ownRecordServiceUpdate() || payoutExpenseRefund() ||
         manager()
         || (
           resource.data.ownerEmail == email()
@@ -360,4 +471,5 @@ service cloud.firestore {
     }
   }
 }
+
 
