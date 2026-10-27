@@ -1,4 +1,5 @@
-import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.3.0";
+import {renderOwnSplitPayouts} from "./budget-split-payout.js?v=1.0.0";
+import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.4.0";
 // Teacher own advance allocation view v1.7.6
 // All enabled users, including managers, see only their own allocations here
 // and can perform one action: confirm receipt of the allocated amount.
@@ -45,11 +46,12 @@ async function loadOwn(force=false){
   const p=planId(),wrap=$("myAdvanceList");
   if(!wrap)return;
   if(!p){wrap.innerHTML='<div class="empty">請先選擇計畫。</div>';return;}
+  await renderOwnSplitPayouts();
   loading=true;
   wrap.innerHTML='<div class="empty">正在讀取我的分配…</div>';
   try{
     const snap=await getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p),where("ownerEmail","==",currentEmail)));
-    const rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
+    const rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true&&!x.payoutSplit);
     const batchIds=[...new Set(rows.map(x=>x.batchId).filter(Boolean))];
     const batchEntries=await Promise.all(batchIds.map(async id=>{
       try{const s=await getDoc(doc(db,"advanceBatches",id));return [id,s.exists()?s.data():null];}
@@ -118,4 +120,5 @@ async function init(){
 }
 window.addEventListener("budget-settlement-refresh",()=>loadOwn(true).catch(showError));
 init();
+
 
