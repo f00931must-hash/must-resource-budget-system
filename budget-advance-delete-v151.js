@@ -165,6 +165,7 @@ async function deleteAllocation(id){
     if(!aSnap.exists())return alert("找不到此活動分配。");
     const a={id,...aSnap.data()};
     if(a.deleted===true)return;
+    if(a.payoutSplit&&Number(a.splitAssigned||0)>0)throw Error("此筆已有分筆付款，請先刪除未領取款項；已領款紀錄須保留");
     if(ownOnly){const b=await getDoc(doc(db,"advanceBatches",a.batchId));if(a.ownerEmail!==email||!b.exists()||b.data().handlerEmail!==email)throw Error("只能解除自己的分配");}
 
     let rSnap=null,r=null;
@@ -265,4 +266,5 @@ const bootstrapObserver=new MutationObserver(()=>{
 });
 bootstrapObserver.observe(document.body,{childList:true,subtree:true});
 init();
+
 
