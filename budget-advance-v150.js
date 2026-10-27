@@ -1,4 +1,5 @@
-import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.3.0";
+import {loadSplitPayouts,splitPending,splitMarkup,splitAction} from "./budget-split-payout.js?v=1.0.0";
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.4.0";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
@@ -17,10 +18,11 @@ const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maxim
 let auth=null,db=null,currentEmail="";
 let ownOnly=false;
 let users=[],categories=[],batches=[],allocations=[],records=[];
+let splitPayouts=[];
 let activeBatchId="";
 let pendingReceiptTeacher="*";
 function pendingReceiptTotal(items,teacher="*"){
-  return items.filter(a=>a.deleted!==true&&a.allocationReceivedConfirmed!==true&&(teacher==="*"||String(a.ownerEmail||"").toLowerCase()===teacher)).reduce((sum,a)=>sum+num(a.estimatedAmount),0);
+  return items.filter(a=>a.deleted!==true).reduce((sum,a)=>sum+splitPending(a,splitPayouts,teacher),0);
 }
 
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
@@ -429,6 +431,7 @@ async function loadAll(){
     getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p),...(ownOnly?[where("ownerEmail","==",currentEmail)]:[]))),
     getDocs(query(collection(db,"expenseRecords"),where("planId","==",p)))
   ]);
+  splitPayouts=await loadSplitPayouts(db,p,currentEmail,ownOnly);
   users=ownOnly?[{id:currentEmail,...uSnap.data()}]:uSnap.docs.map(d=>({id:d.id,...d.data()}));
   categories=cSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
   batches=bSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.deleted!==true);
@@ -489,6 +492,7 @@ function render(){
     const user=users.find(u=>String(u.id||"").toLowerCase()===email);
     assignedTeachers.set(email,user?.name||a.ownerName||"未填姓名");
   }
+  splitPayouts.filter(p=>p.batchId===b.id).forEach(p=>assignedTeachers.set(p.ownerEmail,p.ownerName||p.ownerEmail));
   if(pendingReceiptTeacher!=="*"&&!assignedTeachers.has(pendingReceiptTeacher))pendingReceiptTeacher="*";
   const teacherOptions=[...assignedTeachers].sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant")).map(([email,name])=>`<option value="${escAttr(email)}" ${email===pendingReceiptTeacher?"selected":""}>${esc(name)}</option>`).join("");
   $("advanceSummary").insertAdjacentHTML("beforeend",`<div class="summary-card"><span>已分配・尚未確認收到</span><select id="advancePendingReceiptTeacher" aria-label="查看老師尚未確認收到的分配金額" style="margin:6px 0 8px;width:100%"><option value="*" ${pendingReceiptTeacher==="*"?"selected":""}>全部老師</option>${teacherOptions}</select><strong id="advancePendingReceiptAmount">${money.format(pendingReceiptTotal(aa,pendingReceiptTeacher))}</strong></div>`);
@@ -527,7 +531,7 @@ function render(){
     const canEdit=false;
     const receiptConfirmed=a.allocationReceivedConfirmed===true;
     const receiptTime=fmtTime(a.allocationReceivedAt);
-    const receiptHtml=receiptConfirmed
+    const receiptHtml=a.payoutSplit?'<span class="allocation-receipt">分筆領款</span>':receiptConfirmed
       ? `<span class="allocation-receipt confirmed">✓ 老師已確認收到</span>${receiptTime?`<small>確認時間：${esc(receiptTime)}</small>`:""}`
       : '<span class="allocation-receipt pending">尚未確認收到</span>';
     return `<div class="advance-grid" data-allocation-id="${escAttr(a.id)}" style="background:#f3f4f6;border-radius:10px;padding:14px 10px;">
@@ -535,9 +539,11 @@ function render(){
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small>${settlementMarkup(a,r,true)}</div>
-      <div>${!receiptConfirmed&&String(a.ownerEmail||"").toLowerCase()===currentEmail?`<button class="primary-btn" data-manager-own-receipt="${a.id}">確認收到分配金額</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
+      <div>${!a.payoutSplit&&!receiptConfirmed&&String(a.ownerEmail||"").toLowerCase()===currentEmail?`<button class="primary-btn" data-manager-own-receipt="${a.id}">確認收到分配金額</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
+      ${splitMarkup(a,splitPayouts)}
     </div>`;
   }).join("");
+  $("advanceAllocationList").querySelectorAll("[data-split-action]").forEach(button=>button.onclick=()=>splitAction(button).catch(showError));
   $("advanceAllocationList").querySelectorAll("[data-settlement-action]").forEach(button=>button.onclick=()=>settlementAction(button).catch(showError));
   document.querySelectorAll("[data-manager-own-receipt]").forEach(button=>button.onclick=()=>confirmOwnReceipt(button.dataset.managerOwnReceipt,button));
   document.querySelectorAll("[data-edit-advance-allocation]").forEach(x=>x.onclick=()=>openAllocationDialog(allocations.find(a=>a.id===x.dataset.editAdvanceAllocation)));
@@ -581,4 +587,5 @@ async function init(){
   });
 }
 init();
+
 
