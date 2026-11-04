@@ -204,6 +204,9 @@ function renderDashboard(){
   const pending=pendingTotal();
   const estimated=estimatedTotal();
   const remain=total-reservedTotal();
+  const personnel=state.categories.find(c=>String(c.name||"").trim()==="輔導人員費");
+  const unusedFixed=personnel?Math.max(Number(personnel.budget||0)-reservedTotal(state.records.filter(r=>r.categoryId===personnel.id)),0):0;
+  const flexibleRemain=remain-unusedFixed;
   const approvedRemain=total-approved;
   const missingVoucher=state.records.filter(r=>r.estimated!==true && !(r.voucherUrl||r.folderUrl)).length;
   const missingConfirm=state.records.filter(r=>r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true).length;
@@ -215,7 +218,7 @@ function renderDashboard(){
     ["已核銷",money.format(approved)],
     ["待核對",money.format(pending)],
     ["已預估",money.format(estimated)],
-    ["計畫剩餘額度",money.format(remain)],
+    ["計畫剩餘額度",`${money.format(remain)}<br><small title="扣除輔導人員費未用額度後，可彈性運用的餘額">（${money.format(flexibleRemain)}）</small>`],
     ["已核銷餘額",money.format(approvedRemain)]
   ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
 
