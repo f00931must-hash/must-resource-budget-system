@@ -430,6 +430,18 @@ service cloud.firestore {
           )
         );
 
+      // Owners may toggle only the advance marker on an unlocked estimated record.
+      allow update: if enabledUser()
+        && resource.data.ownerEmail == email()
+        && resource.data.get('estimated', false) == true
+        && resource.data.get('deleted', false) == false
+        && !recordLocked()
+        && request.resource.data.hanlongAdvance is bool
+        && request.resource.data.hanlongAdvance != resource.data.get('hanlongAdvance', false)
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hanlongAdvance','updatedAt','updatedBy']);
+
       allow update: if enabledUser() && linkedRecordProtected() && adjustmentProtected()
         && (manager() || ownRecordServiceUpdate() || payoutExpenseRefund() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
         ownRecordServiceUpdate() || payoutExpenseRefund() ||
