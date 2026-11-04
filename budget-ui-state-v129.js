@@ -8,7 +8,7 @@
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import { getFirestore, collection, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
-import "./budget-manager-usability-v136.js?v=1.7.2";
+import "./budget-manager-usability-v136.js?v=1.12.2";
 import "./budget-manager-waiver-fix-v138.js?v=1.7.2";
 
 const PROJECT_ID="must-resource-budget-system";
