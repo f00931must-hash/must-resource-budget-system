@@ -32,11 +32,13 @@ export function fromGrid(grid, purchase) {
     return cols.every(i => i >= 0);
   });
   if (start < 0) throw new Error("找不到" + (purchase ? "請購" : "核銷") + "明細欄位，請確認檔案選對了。");
-  const desc = grid[start].map(head).indexOf("使用說明");
+  const headers = grid[start].map(head);
+  const desc = headers.indexOf("使用說明");
+  const applicantCol = headers.indexOf("申請人");
   return grid.slice(start + 1).flatMap(row => {
     const [status,id,code,name,a,b,refs] = cols.map(i => trim(row[i]));
     if (!id || !ids(id).includes(id.toUpperCase()) || status === "作廢") return [];
-    return [{status,id:id.toUpperCase(),code,name:name || trim(row[desc]),amount:money(a),settled:purchase?money(b):0,refs:ids(refs)}];
+    return [{status,id:id.toUpperCase(),code,name:name || trim(row[desc]),applicant:trim(row[applicantCol]),amount:money(a),settled:purchase?money(b):0,refs:ids(refs)}];
   });
 }
 function xmlGrid(bytes) {
@@ -127,7 +129,7 @@ export function reconcile(records, claims, purchases) {
   for (const rows of purchaseGroups.values()) if(rows.some(omitted)) for(const r of rows) for(const id of r.refs) omittedIds.add(id);
   const allClaimIds=new Set(claimGroups.keys());
   const purchaseEntries=[...purchaseGroups].filter(([,rs])=>!rs.some(omitted)).map(([id,rs])=>({
-    id, name:joined(rs.map(r=>r.name)),status:joined(rs.map(r=>r.status)),
+    id, name:joined(rs.map(r=>r.name)),applicants:distinct(rs.map(r=>r.applicant)),status:joined(rs.map(r=>r.status)),
     refs:distinct(rs.flatMap(r=>r.refs)),requested:sum(rs,r=>r.amount),settled:sum(rs,r=>r.settled)
   })).filter(p=>!p.refs.length || !p.refs.every(id=>omittedIds.has(id)));
   const linked = by(purchaseEntries.flatMap(p=>p.refs.filter(id=>allClaimIds.has(id)).map(id=>({id,p}))), x=>x.id);
@@ -135,7 +137,7 @@ export function reconcile(records, claims, purchases) {
     const amount=sum(rs,r=>r.amount), ps=(linked.get(id)||[]).map(x=>x.p);
     const direct=ps.filter(p=>p.refs.length===1 && p.settled!==0);
     return {ids:[id,...ps.map(p=>p.id)],claim:id,purchase:joined(ps.map(p=>p.id)),
-      name:joined(rs.map(r=>r.name)), aliases:ps.map(p=>p.name), status:joined(rs.map(r=>r.status)),
+      name:joined(rs.map(r=>r.name)), applicants:distinct([...rs.map(r=>r.applicant),...ps.flatMap(p=>p.applicants)]), aliases:ps.map(p=>p.name), status:joined(rs.map(r=>r.status)),
       amount, compare:direct.length===1?direct[0].settled:amount,
       requested:ps.length===1 && ps[0].refs.length===1?ps[0].requested:null};
   });
@@ -147,12 +149,12 @@ export function reconcile(records, claims, purchases) {
       && pn.some(n=>n.length>=6&&names(e.name).includes(n)));
     if(candidates.length!==1)continue;
     const e=candidates[0];
-    e.ids.push(p.id);e.purchase=p.id;e.requested=p.requested;e.aliases.push(p.name);
+    e.ids.push(p.id);e.purchase=p.id;e.requested=p.requested;e.aliases.push(p.name);e.applicants=distinct([...e.applicants,...p.applicants]);
     absorbed.add(p.id);
   }
   const standalone=unlinked.filter(p=>!absorbed.has(p.id));
   const entries=[...claimEntries,...standalone.map(p=>({
-    ids:[p.id,...p.refs],claim:joined(p.refs),purchase:p.id,name:p.name,aliases:[],status:p.status,
+    ids:[p.id,...p.refs],claim:joined(p.refs),purchase:p.id,name:p.name,applicants:p.applicants,aliases:[],status:p.status,
     amount:p.settled||null,compare:p.settled||p.requested,requested:p.requested,purchaseOnly:true
   }))].map(e=>({...e,names:distinct([e.name,...e.aliases].flatMap(names)),term:termIn(e.name)}));
   const edges=local.map(l=>entries.map((e,j)=>({j,s:score(l,e)})).filter(x=>x.s>=40).sort((a,b)=>b.s-a.s));
@@ -240,12 +242,12 @@ async function makeWorkbook(result,plan) {
   sheet(wb,"金額總覽",["項目","資教金額","會統金額","資教－會統","說明"],[
     ...result.overview,["計畫",null,null,null,plan],["資教納入筆數",result.count,null,null,"排除助理人員服務費、輔導人員費、課業輔導鐘點費；會統排除作廢。"]
   ],[30,17,17,17,75],[2,3,4]);
-  sheet(wb,"差異明細",["差異類型","資教科目","資教案名","資教狀態","資教金額","核銷單號","會統案名／使用說明","會統狀態","會統核銷明細金額","請購單號","會統申請金額","候選金額差","已核銷差額貢獻","原因／待查事項"],
+  sheet(wb,"差異明細",["差異類型","資教科目","資教案名","資教狀態","資教金額","核銷單號","會統案名／使用說明","會統狀態","會統核銷明細金額","請購單號","會統申請金額","候選金額差","已核銷差額貢獻","原因／待查事項","申請人"],
     result.details.map(({type,l,group,delta,net,why})=>{
       const e=group.length===1?group[0]:null;
       return [type,l?.category,l?.name,l?.stage,l?.amount,joined(group.map(g=>g.claim)),joined(group.map(g=>g.name)),
-        joined(group.map(g=>g.status)),e?.amount,joined(group.map(g=>g.purchase)),e?.requested,delta,net,why];
-    }),[32,21,39,13,14,22,52,14,19,22,16,15,17,55],[5,9,11,12,13]);
+        joined(group.map(g=>g.status)),e?.amount,joined(group.map(g=>g.purchase)),e?.requested,delta,net,why,joined(group.flatMap(g=>g.applicants))||l?.applicant];
+    }),[32,21,39,13,14,22,52,14,19,22,16,15,17,55,20],[5,9,11,12,13]);
   return wb.xlsx.writeBuffer();
 }
 export function openReconciliation({plan,valid,authorized,getRecords,download}) {

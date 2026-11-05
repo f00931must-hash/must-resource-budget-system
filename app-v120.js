@@ -41,6 +41,7 @@ $("newCategoryBtn").addEventListener("click", openNewCategory);
 $("recordForm").addEventListener("submit", saveRecord);
 $("categoryForm").addEventListener("submit", saveCategory);
 ["filterCategory","filterSemester","filterReview","filterIssue","searchInput"].forEach(id=>$(id).addEventListener("input", renderRecords));
+$("filterTeacher")?.addEventListener("change",renderRecords);
 $("recordEstimated").addEventListener("change", updateRecordRequirements);
 $("recordVoucherFile").addEventListener("change", ()=>{
   if($("recordVoucherFile").files?.[0]) $("recordArchived").checked = true;
@@ -65,7 +66,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
   button.disabled=true;
   try{
     if(!await authorized())return toast("無法確認經費管理員權限，請確認連線或重新登入",5000);
-    const {openReconciliation}=await import(new URL("./budget-reconciliation.js?v=1",document.baseURI).href);
+    const {openReconciliation}=await import(new URL("./budget-reconciliation.js?v=2",document.baseURI).href);
     if(!valid())return;
     openReconciliation({
       plan:currentPlan()?.name||"目前計畫", valid, authorized,
@@ -79,6 +80,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
         return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
           name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
           amount:r.amount, stage:recordStageText(r), semester:r.semester, note:r.note,
+          applicant:budgetUserName(r.ownerEmail,r.ownerName),
           accountingId:r.accountingId
         }));
       },
@@ -208,6 +210,7 @@ function renderAll(){
   renderDashboard();
   renderCategoryOptions();
   renderSemesterOptions();
+  renderTeacherOptions();
   renderRecords();
   updatePlanLocks();
   if(isManager()) renderCategoryAdmin();
@@ -304,21 +307,49 @@ function renderSemesterOptions(){
   if(semesters.includes(current)) $("filterSemester").value=current;
 }
 
+function recordTeacherKey(record){
+  const email=String(record.ownerEmail||"").trim().toLowerCase();
+  const name=String(record.ownerName||"").trim();
+  return email ? "email:"+email : name ? "name:"+name : "";
+}
+
+function renderTeacherOptions(){
+  const select=$("filterTeacher");
+  if(!select)return;
+  const selected=select.value;
+  const teachers=new Map();
+  for(const record of state.records){
+    if(record.deleted===true)continue;
+    const key=recordTeacherKey(record);
+    if(!key)continue;
+    const name=String(record.ownerName||"").trim();
+    if(!teachers.has(key)||(!teachers.get(key).name&&name)){
+      teachers.set(key,{name,email:record.ownerEmail});
+    }
+  }
+  const options=[...teachers].map(([key,{name,email}])=>[key,budgetUserName(email,name)||"未標記"]);
+  options.sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant-TW")||a[0].localeCompare(b[0]));
+  select.replaceChildren(new Option("全部老師",""),...options.map(([key,name])=>new Option(name,key)));
+  select.value=teachers.has(selected)?selected:"";
+}
+
 function filteredRecords(){
   const cat=$("filterCategory").value;
   const semester=$("filterSemester").value;
   const review=$("filterReview").value;
   const issue=$("filterIssue").value;
+  const teacher=$("filterTeacher")?.value;
   const term=$("searchInput").value.trim().toLowerCase();
   let rows=[...state.records];
   if(cat) rows=rows.filter(r=>r.categoryId===cat);
+  if(teacher) rows=rows.filter(r=>recordTeacherKey(r)===teacher);
   if(semester) rows=rows.filter(r=>String(r.semester||"")===semester);
   if(review==="approved") rows=rows.filter(isApproved);
   if(review==="pending") rows=rows.filter(isPending);
   if(review==="estimated") rows=rows.filter(r=>r.estimated===true);
   if(issue==="missingVoucher") rows=rows.filter(r=>r.estimated!==true && !(r.voucherUrl||r.folderUrl));
   if(issue==="unconfirmed") rows=rows.filter(r=>r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true);
-  if(term) rows=rows.filter(r=>[r.purpose,r.ownerName,r.ownerEmail,r.semester].some(v=>String(v||"").toLowerCase().includes(term)));
+  if(term) rows=rows.filter(r=>[r.purpose,r.semester].some(v=>String(v||"").toLowerCase().includes(term)));
   return rows.sort((a,b)=>tsMillis(b.createdAt)-tsMillis(a.createdAt) || String(b.semester||"").localeCompare(String(a.semester||"")));
 }
 
