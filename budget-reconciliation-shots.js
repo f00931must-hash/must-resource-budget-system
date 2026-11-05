@@ -2,7 +2,21 @@ const excluded=/助理人員服務費|輔導人員費|課業輔導鐘點費/;
 const norm=v=>String(v??"").normalize("NFKC").trim();
 const nameKey=v=>norm(v).toLowerCase()
   .replace(/^(?:(?:申請|請購|擬核銷|核銷|擬?辦理|資源教室|教補身障|資教)[\s\p{P}\p{S}]*)+/u,"")
-  .replace(/[^\p{L}\p{N}]/gu,"");
+  .replace(/溼/g,"濕").replace(/[^\p{L}\p{N}]/gu,"");
+// Accept an abbreviated title only when its distinctive wording survives in the same order.
+function abbreviatedName(a,b){
+  if(a.length>b.length)[a,b]=[b,a];
+  if(a.length<5||a.length===b.length||a.length*2<b.length)return false;
+  if(!/\p{Script=Han}/u.test(a))return false;
+  let i=0;for(const ch of b)if(ch===a[i])i++;
+  if(i!==a.length)return false;
+  const meaningful=s=>s.replace(/合理調整|推廣文宣品|宣導品|資源教室|會議|工作坊|研習|活動|費用|經費|年度|學年度|學期|採購|用品|耗材/g,"");
+  const x=meaningful(a),y=meaningful(b);
+  if(x.length<3||y.length<3)return false;
+  for(let j=0;j+3<=x.length;j++)if(y.includes(x.slice(j,j+3)))return true;
+  return false;
+}
+const applicantKey=v=>norm(v).replace(/\s+/g,"");
 const cash=n=>Number(n).toLocaleString("zh-TW",{maximumFractionDigits:2});
 const num=v=>{const raw=norm(v),s=raw.replace(/,/g,"");return /^-?(?:\d+|\d{1,3}(?:,\d{3})+)(\.\d{1,2})?$/.test(raw)&&Number.isSafeInteger(Math.round(Number(s)*100))?Number(s):null;};
 const sum=(rs,f)=>rs.reduce((n,r)=>n+Math.round(f(r)*100),0)/100;
@@ -54,10 +68,19 @@ export function calculateShots(rows,records){
   const recordsForMatch=records.filter(r=>!excluded.test(r.category));
   const candidates=groups.map(g=>recordsForMatch.map((r,i)=>{
     const id=refs([r.accountingId,r.note,r.name].join(" "));
-    if(g.group.some(s=>id.includes(s.id)))return {i,rank:3};
-    const n=nameKey(r.name);
-    return n.length>=4&&g.group.some(s=>!/(?:…|\.{2,})/.test(s.name)&&nameKey(s.name)===n&&
-      (Number(r.amount)===g.amount||norm(r.applicant)&&norm(r.applicant)===norm(s.applicant)))?{i,rank:Number(r.amount)===g.amount?2:1}:null;
+    if(g.group.some(s=>id.includes(s.id)))return {i,rank:4};
+    if(id.length)return null;
+    const n=nameKey(r.name), applicant=applicantKey(r.applicant);
+    if(n.length<4)return null;
+    const sameAmount=g.amount!==null&&Number(r.amount)===g.amount;
+    let rank=0;
+    for(const s of g.group){
+      if(/(?:…|\.{2,})/.test(s.name))continue;
+      const key=nameKey(s.name), sameApplicant=!!applicant&&applicant===applicantKey(s.applicant);
+      if(key===n&&(sameAmount||sameApplicant))rank=Math.max(rank,sameAmount?3:1);
+      else if(sameAmount&&sameApplicant&&abbreviatedName(n,key))rank=Math.max(rank,2);
+    }
+    return rank?{i,rank}:null;
   }).filter(Boolean));
   const used=new Set(), details=[];
   groups.forEach((g,k)=>{
