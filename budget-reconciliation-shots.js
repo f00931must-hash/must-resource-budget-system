@@ -70,26 +70,28 @@ export function calculateShots(rows,records){
   const budgetRecords=records.filter(r=>!excluded.test(r.category)&&["已核銷","預估","請購中","核銷中"].includes(r.stage));
   const budget=sum(budgetRecords,r=>Number(r.amount||0));
   const budgetClaimed=sum(budgetRecords.filter(r=>r.stage==="已核銷"),r=>Number(r.amount||0));
-  const seen=new Set();
-  const groups=active.flatMap(r=>{
-    if(seen.has(r.id))return [];
-    const queue=[r], group=[];seen.add(r.id);
-    for(const s of queue){
-      group.push(s);
-      for(const id of links.get(s.id))if(!seen.has(id)){seen.add(id);queue.push(kept.get(id));}
-    }
-    const counted=group.filter(s=>s.kind==="claim"||!transferred(s));
-    return [{group,amount:counted.length?sum(counted,s=>s.amount):null}];
-  });
+  // The purchase is a reference for each claim, not the unit of reconciliation.
+  const purchaseClaimCount=p=>new Set([...p.related,...links.get(p.id)]).size;
+  const groups=[
+    ...claims.map(claim=>{
+      const parents=[...links.get(claim.id)].map(id=>kept.get(id)).filter(r=>r.kind==="purchase");
+      const singleParents=parents.filter(p=>purchaseClaimCount(p)===1);
+      return {group:[...parents,claim],matchRows:[claim,...singleParents],
+        sharedParentIds:parents.filter(p=>!singleParents.includes(p)).map(p=>p.id),amount:claim.amount};
+    }),
+    ...active.filter(p=>p.kind==="purchase"&&!links.get(p.id).size).map(p=>({
+      group:[p],matchRows:[p],sharedParentIds:[],amount:transferred(p)?null:p.amount
+    }))
+  ];
   const recordsForMatch=records.filter(r=>!excluded.test(r.category));
   const candidates=groups.map(g=>recordsForMatch.map((r,i)=>{
     const id=refs([r.accountingId,r.note,r.name].join(" "));
-    if(g.group.some(s=>id.includes(s.id)))return {i,rank:100};
-    if(id.length)return null;
+    if(g.matchRows.some(s=>id.includes(s.id)))return {i,rank:100};
+    if(id.some(n=>!g.sharedParentIds.includes(n)))return null;
     const n=nameKey(r.name), term=termKey(r.name);
     const sameAmount=g.amount!==null&&Number(r.amount)===g.amount;
     let rank=0;
-    for(const s of g.group){
+    for(const s of g.matchRows){
       const sourceTerm=termKey(s.name);
       if(term&&sourceTerm&&term!==sourceTerm)continue;
       const person=samePerson(r.applicant,s.applicant), truncated=/(?:…|\.{2,})/.test(s.name);
