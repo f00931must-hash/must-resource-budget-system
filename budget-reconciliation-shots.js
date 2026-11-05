@@ -111,8 +111,19 @@ export function grid(pixels,w,h){
   }
   const run=runs.sort((a,b)=>b.length-a.length)[0];
   if(!run||run.length<2)throw Error("無法定位表格，請保留欄位標題與格線，或手動補登。");
-  const xs=unique([0,...run[0].xs,w]);
+  const xs=[...new Set([0,...run[0].xs,w])];
   return {ys:[run[0].a,...run.map(b=>b.b)],xs};
+}
+export function purchaseColumns(xs){
+  // Identify the known form by the widths of ten consecutive columns, independent of crop or zoom.
+  const widths=[86,52,51,172,172,241,344,86,172,86];
+  for(let s=0;s+widths.length<xs.length;s++){
+    const scale=(xs[s+7]-xs[s+6])/widths[6];
+    if(scale<0.45||scale>3.5)continue;
+    if(widths.every((w,i)=>Math.abs(xs[s+i+1]-xs[s+i]-w*scale)<=Math.max(4,w*scale*0.09)))
+      return {status:s,documentCols:[s+3],name:s+5,code:s+6,amount:s+7,applicant:s+9};
+  }
+  return null;
 }
 function words(tsv,scale){
   return String(tsv||"").split("\n").slice(1).flatMap(s=>{
@@ -142,9 +153,13 @@ async function readPage(w,file,kind,page){
     }));
     const headers=cells.shift().map(s=>s.replace(/\s/g,""));
     const col=(rx)=>headers.findIndex(x=>rx.test(x));
-    const status=col(/現況|狀態/), name=col(/案名|用途|摘要/), amount=col(kind==="claim"?/核銷金額|^金額$|報支金額/:/^金額$|申請金額|請購金額/);
-    const applicant=col(/申請人|承辦人/),code=col(/預算來源|預算編號|經費來源/), documentCols=headers.map((h,i)=>/單號|編號/.test(h)&&i!==code?i:-1).filter(i=>i>=0);
-    if([status,name,amount,code].some(i=>i<0)||!documentCols.length)throw Error("未能辨識表頭欄位；可換一張含完整欄位標題的截圖，或手動補登。");
+    const codeCol=col(/預算來源|預算編號|經費來源|經費科目/);
+    const fallback={status:col(/現況|狀態/),name:col(/案名|用途|摘要/),
+      amount:col(kind==="claim"?/核銷金額|^金額$|報支金額|報銷金額/:/^金額$|申請金額|請購金額/),
+      applicant:col(/申請人|承辦人|經辦人/),code:codeCol,
+      documentCols:headers.map((h,i)=>/單號|編號/.test(h)&&i!==codeCol?i:-1).filter(i=>i>=0)};
+    const {status,name,amount,applicant,code,documentCols}=(kind==="purchase"?purchaseColumns(xs):null)||fallback;
+    if([status,name,amount,code].some(i=>i<0)||!documentCols.length)throw Error("未能辨識會統表頭；請確認截圖類別正確，並保留表格左右兩側及欄位標題。");
     return cells.map(c=>{
       const numbers=refs(documentCols.map(i=>(c[i]||"").replace(/(?<=\d)\s+(?=\d)|(?<=\bG)\s+(?=\d)/gi,"")).join(" "));
       const id=numbers.find(x=>kind==="claim"?x.startsWith("G"):!x.startsWith("G"))||"";
@@ -218,7 +233,7 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
     const pane=page.pane??node("details");
     pane.style.cssText="margin:8px 0;border:1px solid #ded6e9;border-radius:8px;padding:8px";
     if(!page.pane){el("pages").append(pane);page.pane=pane;}
-    const title=node("summary",page.label+"｜"+page.rows.length+" 列"+(page.error?"｜需手動補登":""));
+    const title=node("summary",page.label+"｜"+(page.error?"未辨識，需檢查原圖":page.rows.length+" 列"));
     const imageLink=node("a","開啟原圖",{href:page.url,target:"_blank",rel:"noopener"});
     const wrap=node("div");wrap.style.overflowX="auto";
     const table=node("table");table.style.cssText="width:100%;min-width:1000px";
@@ -267,7 +282,7 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
         pages.push(page);renderPage(page);lock(true);
       }
       inputs.forEach(i=>i.value="");pasted.purchase=[];pasted.claim=[];
-      say("已加入 "+pages.length+" 張截圖。請展開各頁檢查，必要時用原圖修正後再計算。");
+      say("已加入 "+pages.length+" 張截圖，其中 "+pages.filter(p=>p.error).length+" 張未能辨識。請展開各頁核對。");
     }catch(e){say(e.message);}
     finally{try{await w?.terminate();}finally{lock(false);}}
   };
