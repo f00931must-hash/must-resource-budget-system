@@ -4,7 +4,7 @@ const termPattern=/(?:\d{3})\s*(?:[-－]\s*[12](?!\d)|學年度第\s*[12一二]\
 const termKey=v=>norm(v).match(termPattern)?.[0].replace(/學年度第\s*([12一二])\s*學期/,"-$1").replace(/一/g,"1").replace(/二/g,"2").replace(/\s/g,"")||"";
 const nameKey=v=>norm(v).toLowerCase().replace(termPattern,"").replace(/^\d{3}年度\s*/,"")
   .replace(/^(?:(?:申請|擬?請購|擬?核銷|擬?辦(?:理)?|健康與諮商中心|資源教室|教補身障|資教|身心障礙學生|特殊教育學生|購買|雜支|學年度|\d{3}年度)[\s\p{P}\p{S}]*)+/u,"")
-  .replace(/溼/g,"濕").replace(/橫桿/g,"橫槓").replace(/特推會/g,"特殊教育推行委員會")
+  .replace(/[×✕]/g,"x").replace(/戶外暨體驗/g,"戶外體驗").replace(/溼/g,"濕").replace(/橫桿/g,"橫槓").replace(/特推會/g,"特殊教育推行委員會")
   .replace(/敬請(?:核示|核銷)[\s\p{P}]*$/u,"")
   .replace(/[^\p{L}\p{N}]/gu,"");
 const core=v=>v.replace(/座談會議$/u,"座談會").replace(/(?:工作坊|活動|講座|會議|研討會|等|暨體驗)+$/u,"");
@@ -96,7 +96,10 @@ export function calculateShots(rows,records){
       const match=titleRank(n,nameKey(s.name),person,truncated);
       const termBonus=term&&term===sourceTerm?2:0;
       if(sameAmount&&match)rank=Math.max(rank,match*10+termBonus+(person?1:0));
-      else if(match===3&&person)rank=Math.max(rank,5+termBonus);
+      else if(match===3){
+        const key=nameKey(s.name), distinctive=core(n)===core(key)&&core(n).length>=10;
+        if(person||distinctive)rank=Math.max(rank,5+termBonus+(person?1:0));
+      }
     }
     return rank?{i,rank}:null;
   }).filter(Boolean));
@@ -176,8 +179,9 @@ function book(result){
   ws.columns=[23,22,37,15,17,23,24,43,17,16].map(width=>({width}));
   ws.addRow(["結果","申請人","資教案名","資教狀態","資教金額","請購單號","核銷單號","會統案名","會統計入金額","差額"]);
   for(const {type,r,group,amount,difference} of result.details)if(type!=="相符"){
-    ws.addRow([type,unique(group.map(g=>g.applicant)).join("／")||r?.applicant,r?.name,r?.stage,r?.amount,
+    const row=ws.addRow([type,unique(group.map(g=>g.applicant)).join("／")||r?.applicant,r?.name,r?.stage,r?.amount,
       group.filter(g=>g.kind==="purchase").map(g=>g.id).join("、"),group.filter(g=>g.kind==="claim").map(g=>g.id).join("、"),unique(group.map(g=>g.name)).join("／"),amount,difference]);
+    if(typeof difference==="number"&&difference!==0)row.getCell(10).font={color:{argb:"FFC00000"},bold:true};
   }
   ws.autoFilter={from:"A1",to:"J1"};
   for(const col of [5,9,10])ws.getColumn(col).numFmt='#,##0.##;[Red]-#,##0.##;0';
