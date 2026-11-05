@@ -25,7 +25,7 @@ let previousBudgetAccount="";
 const money = new Intl.NumberFormat("zh-TW", { style:"currency", currency:"TWD", maximumFractionDigits:0 });
 
 $("loginBtn").addEventListener("click", async()=>{
-  try { await signInWithPopup(auth, provider); }
+  try { await auth.authStateReady(); if(!auth.currentUser) await signInWithPopup(auth, provider); }
   catch(e) { toast(`登入失敗：${e.message}`, 5000); }
 });
 $("logoutBtn").addEventListener("click", ()=>signOut(auth));
@@ -244,9 +244,9 @@ function renderDashboard(){
     const recs=state.records.filter(r=>r.categoryId===c.id);
     const approved=approvedTotal(recs), pending=pendingTotal(recs), estimated=estimatedTotal(recs);
     const rem=Number(c.budget||0)-reservedTotal(recs);
-    return `<tr><td><strong>${esc(c.name)}</strong></td><td class="amount">${money.format(c.budget||0)}</td><td class="amount">${money.format(approved)}</td><td class="amount">${money.format(pending)}</td><td class="amount">${money.format(estimated)}</td><td class="amount">${money.format(rem)}</td></tr>`;
+    return `<tr><td><strong>${esc(c.name)}</strong></td><td class="amount">${money.format(c.budget||0)}</td><td class="amount">${money.format(approved)}</td><td class="amount">${money.format(pending)}</td><td class="amount">${money.format(estimated)}</td><td class="amount">${money.format(rem)}（${money.format(Number(c.budget||0)-approved-pending)}）</td></tr>`;
   }).join("");
-  $("budgetTableWrap").innerHTML=`<table><thead><tr><th>經費項目</th><th class="amount">編列額度</th><th class="amount">已核銷</th><th class="amount">待核對</th><th class="amount">已預估</th><th class="amount">剩餘</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $("budgetTableWrap").innerHTML=`<table><thead><tr><th>經費項目</th><th class="amount">編列額度</th><th class="amount">已核銷</th><th class="amount">待核對</th><th class="amount">已預估</th><th class="amount">剩餘（括號＝未扣預估）</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderCategoryOptions(){
