@@ -215,6 +215,7 @@ export function reconcile(records, claims, purchases) {
   return {overview,details,count:local.length};
 }
 function sheet(wb,name,headers,rows,widths,numbers) {
+  const claimColumn=headers.indexOf("核銷單號"), purchaseColumn=headers.indexOf("請購單號");
   const ws=wb.addWorksheet(name,{views:[{state:"frozen",ySplit:1}]});
   ws.columns=widths.map(width=>({width}));
   ws.addRow(headers);
@@ -231,7 +232,7 @@ function sheet(wb,name,headers,rows,widths,numbers) {
     row.alignment={vertical:"middle",wrapText:true};
     const lines=Math.max(...r.map((v,j)=>Math.ceil(String(v??"").length/Math.max(1,Math.floor(widths[j]*0.52)))));
     row.height=Math.min(120,Math.max(23,lines*16));
-    if(r[0]==="會統已建單，金額待確認" || (r[9] && !r[5])){
+    if(r[0]==="會統已建單，金額待確認" || (purchaseColumn>=0 && r[purchaseColumn] && !r[claimColumn])){
       row.eachCell({includeEmpty:true},cell=>{cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFFFF29C"}};});
     }
   });
@@ -242,12 +243,12 @@ async function makeWorkbook(result,plan) {
   sheet(wb,"金額總覽",["項目","資教金額","會統金額","資教－會統","說明"],[
     ...result.overview,["計畫",null,null,null,plan],["資教納入筆數",result.count,null,null,"排除助理人員服務費、輔導人員費、課業輔導鐘點費；會統排除作廢。"]
   ],[30,17,17,17,75],[2,3,4]);
-  sheet(wb,"差異明細",["差異類型","資教科目","資教案名","資教狀態","資教金額","核銷單號","會統案名／使用說明","會統狀態","會統核銷明細金額","請購單號","會統申請金額","候選金額差","已核銷差額貢獻","原因／待查事項","申請人"],
+  sheet(wb,"差異明細",["差異類型","申請人","資教科目","資教案名","資教狀態","資教金額","核銷單號","會統案名／使用說明","會統狀態","會統核銷明細金額","請購單號","會統申請金額","候選金額差","已核銷差額貢獻","原因／待查事項"],
     result.details.map(({type,l,group,delta,net,why})=>{
       const e=group.length===1?group[0]:null;
-      return [type,l?.category,l?.name,l?.stage,l?.amount,joined(group.map(g=>g.claim)),joined(group.map(g=>g.name)),
-        joined(group.map(g=>g.status)),e?.amount,joined(group.map(g=>g.purchase)),e?.requested,delta,net,why,joined(group.flatMap(g=>g.applicants))||l?.applicant];
-    }),[32,21,39,13,14,22,52,14,19,22,16,15,17,55,20],[5,9,11,12,13]);
+      return [type,joined(group.flatMap(g=>g.applicants))||l?.applicant,l?.category,l?.name,l?.stage,l?.amount,joined(group.map(g=>g.claim)),joined(group.map(g=>g.name)),
+        joined(group.map(g=>g.status)),e?.amount,joined(group.map(g=>g.purchase)),e?.requested,delta,net,why];
+    }),[32,20,21,39,13,14,22,52,14,19,22,16,15,17,55],[6,10,12,13,14]);
   return wb.xlsx.writeBuffer();
 }
 export function openReconciliation({plan,valid,authorized,getRecords,download}) {
