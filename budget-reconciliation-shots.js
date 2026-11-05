@@ -12,7 +12,7 @@ export function calculateShots(rows,records){
   let duplicates=0;
   for(const r of rows){
     const id=norm(r.id).toUpperCase(), amount=num(r.amount), status=norm(r.status);
-    if(!status||!norm(r.name)||!norm(r.code)||amount===null||!(r.kind==="purchase"?/^1\d{11}$/:/^G\d{11}$/).test(id))throw Error("請補齊有效的單號、案名、狀態、預算來源及金額："+(id||r.page));
+    if(!status||!norm(r.name)||(r.kind==="purchase"&&!norm(r.code))||amount===null||!(r.kind==="purchase"?/^1\d{11}$/:/^G\d{11}$/).test(id))throw Error("請補齊有效的單號、案名、狀態及金額（請購另需預算來源）："+(id||r.page));
     const related=norm(r.related).toUpperCase().split(/[\s、,，;；／/]+/).filter(Boolean);
     if(related.some(x=>!(r.kind==="purchase"?/^G\d{11}$/:/^1\d{11}$/).test(x)))throw Error("關聯單號格式不正確："+id);
     const row={...r,id,amount,status,related:unique(related).sort()};
@@ -176,8 +176,8 @@ export function readCopiedTable(text,kind,page){
     const cols=pending.join("\n").split("\t").map(norm), at=k=>cols[columns[k]]||"";
     const numbers=refs(columns.documents.map(i=>cols[i]||"").join(" "));
     const primary=numbers.filter(id=>kind==="claim"?id.startsWith("G"):!id.startsWith("G"));
-    if(primary.length!==1||num(at("amount"))===null||!at("name")||!at("code"))
-      throw Error("有一列缺少完整的單號、案名、預算來源或金額，請重新複製完整表格。");
+    if(primary.length!==1||num(at("amount"))===null||!at("name")||(kind==="purchase"&&!at("code")))
+      throw Error("有一列缺少完整的單號、案名或金額（請購另需預算來源），請重新複製完整表格。");
     rows.push({kind,page,id:primary[0],related:numbers.filter(id=>id!==primary[0]).join("、"),
       name:at("name"),status:at("status"),amount:at("amount"),code:at("code").replace(/\n+/g," "),applicant:at("applicant")});
     pending=null;
@@ -185,12 +185,12 @@ export function readCopiedTable(text,kind,page){
   for(let i=0;i<lines.length;i++){
     const line=lines[i], normalized=norm(line), cells=line.split("\t").map(norm);
     if(cells.includes("案名")&&(cells.includes("金額")||cells.some(v=>/^(核銷|請購|申請|報支)金額$/.test(v)))){
-      const header=(/^\s*維護\t/.test(lines[i-1]||"")?lines[i-1]+"\n"+line:line).split("\t").map(v=>norm(v).replace(/\s+/g,""));
+      const header=(/^\s*維護\t/.test(lines[i-1]||"")?lines[i-1]+"\n"+line:line).split("\t").map(v=>norm(v).replace(/[\s▼▲▽△↕]+/g,""));
       const index=re=>header.findIndex(v=>re.test(v));
       const next={status:index(/^(現況|表單狀態|狀態)$/),name:index(/^案名$/),code:index(/^(預算來源|經費來源|預算編號)$/),
         amount:index(kind==="claim"?/^(核銷金額|報支金額|金額)$/:/^(請購金額|申請金額|金額)$/),applicant:index(/^(申請人|承辦人|經辦人)$/),
-        documents:header.map((v,j)=>/^(單號|申請單號|核銷單號|請購單號|申請編號|核銷編號|請購編號|報支單號)$/.test(v)?j:-1).filter(j=>j>=0)};
-      if([next.status,next.name,next.code,next.amount].some(j=>j<0)||!next.documents.length)throw Error("表頭缺少必要欄位，請連同欄位標題一起複製。");
+        documents:header.map((v,j)=>/^(單號|申請單號|本核銷單號|核銷單號|請購單號|申請編號|核銷編號|請購編號|報支單號|相關編號)$/.test(v)?j:-1).filter(j=>j>=0)};
+      if([next.status,next.name,next.amount,...(kind==="purchase"?[next.code]:[])].some(j=>j<0)||!next.documents.length)throw Error("表頭缺少必要欄位，請連同欄位標題一起複製。");
       flush();columns=next;tables++;continue;
     }
     if(!columns)continue;
@@ -281,7 +281,7 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
       for(const [k,l] of fields){
         const td=node("td"),input=node("input","",{"aria-label":l+" 第 "+(i+1)+" 列",type:"text"});
         input.value=row[k];input.style.cssText="width:100%;min-width:"+(k==="name"||k==="code"?150:k==="id"||k==="related"?115:65)+"px;padding:5px";
-        if(!row[k]&&["id","amount","status","name","code"].includes(k))input.style.background="#fff4c2";
+        if(!row[k]&&(["id","amount","status","name"].includes(k)||(k==="code"&&row.kind==="purchase")))input.style.background="#fff4c2";
         input.addEventListener("input",()=>{row[k]=input.value;invalidate();});td.append(input);tr.append(td);
       }
       const td=node("td"),remove=node("button","×",{type:"button","aria-label":"移除第 "+(i+1)+" 列"});
