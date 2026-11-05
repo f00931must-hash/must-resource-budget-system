@@ -454,6 +454,36 @@ service cloud.firestore {
         && request.resource.data.get('reviewed', false) == false
         && request.resource.data.get('locked', false) == false;
 
+      // An owner can submit an estimated expense for review with a confirmed voucher.
+      // Limit this transition to expense-form fields; allocation and audit fields remain protected.
+      allow update: if enabledUser()
+        && resource.data.ownerEmail == email()
+        && resource.data.get('deleted', false) == false
+        && !recordLocked()
+        && resource.data.get('estimated', false) == true
+        && request.resource.data.estimated == false
+        && request.resource.data.get('estimateStage', '') == ''
+        && request.resource.data.reviewStatus == 'pending'
+        && request.resource.data.get('reviewed', false) == false
+        && request.resource.data.get('locked', false) == false
+        && request.resource.data.archived == true
+        && request.resource.data.amountConfirmed == true
+        && hasVoucher(request.resource.data)
+        && request.resource.data.amount is number
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
+          'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
+          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
+          'voucherFileType','updatedAt','updatedBy'
+        ])
+        && (!linked(resource.data) || (
+          request.resource.data.amount == resource.data.amount
+          && request.resource.data.categoryId == resource.data.categoryId
+          && request.resource.data.semester == resource.data.semester
+        ));
+
       // Owners may toggle only the advance marker on an unlocked estimated record.
       allow update: if enabledUser()
         && resource.data.ownerEmail == email()
@@ -468,7 +498,7 @@ service cloud.firestore {
 
       allow update: if enabledUser() && linkedRecordProtected() && adjustmentProtected()
         && (manager() || ownRecordServiceUpdate() || (linked(resource.data) && payoutExpenseRefund()) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
-        ownRecordServiceUpdate() || payoutExpenseRefund() ||
+        ownRecordServiceUpdate() || (linked(resource.data) && payoutExpenseRefund()) ||
         manager()
         || (
           resource.data.ownerEmail == email()
