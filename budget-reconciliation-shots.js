@@ -2,17 +2,34 @@ const excluded=/助理人員服務費|輔導人員費|課業輔導鐘點費/;
 const norm=v=>String(v??"").normalize("NFKC").trim();
 const termPattern=/(?:\d{3})\s*(?:[-－]\s*[12](?!\d)|學年度第\s*[12一二]\s*學期)/;
 const termKey=v=>norm(v).match(termPattern)?.[0].replace(/學年度第\s*([12一二])\s*學期/,"-$1").replace(/一/g,"1").replace(/二/g,"2").replace(/\s/g,"")||"";
-const nameKey=v=>norm(v).toLowerCase().replace(termPattern,"").replace(/^\d{3}年度\s*/,"")
+const nameKey=v=>{
+  let title=norm(v).toLowerCase();
+  if(/個別化支持計畫|\bisp\b/u.test(title))title=title.replace(/(?:學)?系(?=[、，,）)」』\s]|$)/gu,"");
+  return title.replace(termPattern,"").replace(/^\d{3}年度\s*/,"")
   .replace(/^(?:(?:申請|擬?請購|擬?核銷|擬?辦(?:理)?|健康與諮商中心|資源教室|教補身障|資教|身心障礙學生|特殊教育學生|購買|雜支|學年度|\d{3}年度)[\s\p{P}\p{S}]*)+/u,"")
   .replace(/[×✕]/g,"x").replace(/戶外暨體驗/g,"戶外體驗").replace(/溼/g,"濕").replace(/橫桿/g,"橫槓").replace(/特推會/g,"特殊教育推行委員會")
   .replace(/敬請(?:核示|核銷)[\s\p{P}]*$/u,"")
   .replace(/[^\p{L}\p{N}]/gu,"");
+};
 const core=v=>v.replace(/座談會議$/u,"座談會").replace(/(?:工作坊|活動|講座|會議|研討會|等|暨體驗)+$/u,"");
 const applicantKey=v=>norm(v).replace(/\s+/g,"");
 function samePerson(a,b){
   a=applicantKey(a);b=applicantKey(b);
   return a.length>=2&&b.length>=2&&(a===b||
     (Math.abs(a.length-b.length)===1&&(a.endsWith(b)||b.endsWith(a))));
+}
+// A copied title can end in an ellipsis after a complete quoted event name.
+const quotedTitle=v=>norm(v).match(/[「『“"]([^」』”"]+)[」』”"]/)?.[1]||"";
+function careerAlias(a,b){
+  const pattern=/^(.{2,})職涯諮詢與評估(?:活動)?$/u;
+  return pattern.test(a)&&pattern.test(b);
+}
+function specificShortTitle(a,b){
+  [a,b]=[core(a),core(b)].sort((x,y)=>x.length-y.length);
+  if(/個別化支持計畫|isp/i.test(a+b))return false;
+  if(!b.includes(a)||a.length<6||a.length*2<b.length)return false;
+  const generic=/^(?:學生|身心障礙|資源教室|期初|期末|工作|會議|研習|活動|工作坊|講座|職涯|諮詢|評估|戶外|體驗|經費|費用|耗材|雜支)+$/u;
+  return !generic.test(a);
 }
 const itemKey=s=>s.includes("及")?s.split("及").sort().join("及"):s;
 function titleRank(a,b,person,truncated){
@@ -95,13 +112,15 @@ export function calculateShots(rows,records){
       const sourceTerm=termKey(s.name);
       if(term&&sourceTerm&&term!==sourceTerm)continue;
       const person=samePerson(r.applicant,s.applicant), truncated=/(?:…|\.{2,})/.test(s.name);
-      const match=titleRank(n,nameKey(s.name),person,truncated);
+      const key=nameKey(s.name), quoted=quotedTitle(s.name);
+      const match=titleRank(n,key,person,truncated);
+      const alias=person&&sameAmount&&careerAlias(n,quoted?nameKey(quoted):key);
       const termBonus=term&&term===sourceTerm?2:0;
-      if(sameAmount&&match)rank=Math.max(rank,match*10+termBonus+(person?1:0));
+      if(sameAmount&&(match||alias))rank=Math.max(rank,(match||1)*10+termBonus+(person?1:0));
       else if(match===3){
-        const key=nameKey(s.name), distinctive=core(n)===core(key)&&core(n).length>=10;
+        const distinctive=core(n)===core(key)&&core(n).length>=10;
         if(person||distinctive)rank=Math.max(rank,5+termBonus+(person?1:0));
-      }
+      }else if(person&&!truncated&&match===2&&specificShortTitle(n,key))rank=Math.max(rank,3+termBonus);
     }
     return rank?{i,rank}:null;
   }).filter(Boolean));
