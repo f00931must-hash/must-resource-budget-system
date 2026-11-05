@@ -143,7 +143,7 @@ function book(result){
   for(const s of [totals,ws]){s.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};s.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF513681"}};}
   return wb.xlsx.writeBuffer();
 }
-export function openShots({plan,valid,authorized,getRecords,saveSummary,download}){
+export function openShots({plan,draftKey,valid,authorized,getRecords,saveSummary,download}){
   if(document.getElementById("budgetShotsDialog"))return;
   const dlg=node("dialog","",{id:"budgetShotsDialog","aria-labelledby":"budgetShotsTitle"});
   dlg.style.cssText="width:min(1150px,calc(100% - 24px));max-height:88vh;box-sizing:border-box;padding:20px";
@@ -151,21 +151,42 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
     <p>在會統逐頁按 Ctrl+A、Ctrl+C，再貼到這裡加入。系統會自動統計去重後的筆數。</p>
     <label>會統表格文字<textarea data-copy rows="5" style="display:block;width:100%;box-sizing:border-box" placeholder="在會統選取含表頭的表格，複製後貼在這裡"></textarea></label>
     <p><button type="button" data-copy-p>加入請購表格</button> <button type="button" data-copy-c>加入核銷表格</button></p>
-    <p><button type="button" data-close>關閉</button></p>
+    <p><button type="button" data-close>關閉</button> <button type="button" data-clear>清除草稿</button></p>
+    <p data-draft role="status">草稿會自動保留在這台裝置的瀏覽器。</p>
     <p data-status role="status" style="white-space:pre-wrap"></p>
     <p data-counts aria-live="polite">已加入：請購 0 筆、核銷 0 筆</p><div data-pages></div>
-    <p><label><input data-verified type="checkbox"> 我已核對全部頁面，確認單號、關聯單號、金額與狀態正確</label></p>
-    <button type="button" class="primary-btn" data-calc>計算並儲存本次對帳</button>
-    <button type="button" data-export disabled>下載本次明細</button><div data-result></div>`;
+    <div style="margin-top:16px;padding:14px;background:#f5effa;border:1px solid #ddcce9;border-radius:10px">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:700;margin:0 0 12px">
+        <input data-verified type="checkbox" style="width:22px;min-width:22px;height:22px;flex:0 0 22px;margin:0;padding:0;accent-color:#7653a6">
+        <span>我已核對全部頁面，確認單號、關聯單號、金額與狀態正確</span>
+      </label>
+      <button type="button" class="primary-btn" data-calc>計算並儲存本次對帳</button>
+      <button type="button" data-export disabled>下載本次明細</button>
+    </div><div data-result></div>`;
   const el=k=>dlg.querySelector("[data-"+k+"]");
   el("plan").textContent=plan;
   const pages=[];let busy=false,result=null;
   const say=s=>el("status").textContent=s;
+  const saveDraft=()=>{
+    if(!valid()||!draftKey)return;
+    try{
+      const copy=el("copy").value;
+      if(!pages.length&&!copy){
+        localStorage.removeItem(draftKey);
+        el("draft").textContent="草稿會自動保留在這台裝置的瀏覽器。";
+        return;
+      }
+      localStorage.setItem(draftKey,JSON.stringify({copy,sequence:copySequence,pages:pages.map(({kind,label,rows})=>({kind,label,rows}))}));
+      el("draft").textContent="草稿已儲存在這台裝置的瀏覽器，下次可繼續。";
+    }catch{
+      el("draft").textContent="這次草稿未能寫入瀏覽器。請先保留此視窗。";
+    }
+  };
   const refreshCounts=()=>{
     const rows=pages.flatMap(p=>p.rows), count=(kind,re)=>unique(rows.filter(r=>r.kind===kind).map(r=>norm(r.id).toUpperCase()).filter(id=>re.test(id))).length;
     el("counts").textContent="已加入（同單號只計一次）：請購 "+count("purchase",/^1\d{11}$/)+" 筆、核銷 "+count("claim",/^G\d{11}$/)+" 筆";
   };
-  const invalidate=()=>{refreshCounts();el("verified").checked=false;el("export").disabled=true;el("result").replaceChildren();result=null;};
+  const invalidate=()=>{saveDraft();refreshCounts();el("verified").checked=false;el("export").disabled=true;el("result").replaceChildren();result=null;};
   const lock=v=>{busy=v;dlg.querySelectorAll("input, textarea, button").forEach(e=>{if(!e.matches("[data-close]"))e.disabled=v;});el("export").disabled=v||!result;};
   function blank(page){return Object.fromEntries([["kind",page.kind],["page",page.label],...fields.map(([k])=>[k,""])]);}
   function renderPage(page){
@@ -202,10 +223,31 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
         const label=kindName(kind)+"｜貼上表格 "+(copySequence+1);
         const rows=readCopiedTable(el("copy").value,kind,label);
         const page={kind,label,rows};copySequence++;
-        pages.push(page);renderPage(page);invalidate();el("copy").value="";
+        pages.push(page);renderPage(page);el("copy").value="";invalidate();
         say("已加入 "+rows.length+" 筆"+kindName(kind)+"資料。可以接著貼下一頁。");
       }catch(e){say(e.message);}
     };
+  }
+  el("copy").addEventListener("input",saveDraft);
+  el("clear").onclick=()=>{
+    if(busy||!valid()||(!pages.length&&!el("copy").value))return;
+    if(!window.confirm("清除目前計畫的對帳草稿？已儲存的對帳結果不受影響。"))return;
+    pages.length=0;copySequence=0;el("copy").value="";el("pages").replaceChildren();
+    invalidate();say("已清除草稿。");
+  };
+  if(draftKey){
+    try{
+      const draft=JSON.parse(localStorage.getItem(draftKey)||"null");
+      if(draft&&Array.isArray(draft.pages)&&draft.pages.every(p=>["purchase","claim"].includes(p.kind)&&typeof p.label==="string"&&Array.isArray(p.rows))){
+        pages.push(...draft.pages);
+        copySequence=Math.max(pages.length,Number.isSafeInteger(draft.sequence)?draft.sequence:0);
+        if(typeof draft.copy==="string")el("copy").value=draft.copy;
+        pages.forEach(renderPage);refreshCounts();
+        if(pages.length||el("copy").value)el("draft").textContent="已接續上次草稿，請確認資料後再勾選核對。";
+      }
+    }catch{
+      el("draft").textContent="無法讀取瀏覽器中的對帳草稿。";
+    }
   }
   const monitor=setInterval(()=>{if(!valid()&&dlg.open)dlg.close();},500);
   const active=()=>dlg.open&&valid();
