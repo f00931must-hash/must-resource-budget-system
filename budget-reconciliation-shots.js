@@ -4,14 +4,19 @@ const termPattern=/(?:\d{3})\s*(?:[-－]\s*[12](?!\d)|學年度第\s*[12一二]\
 const termKey=v=>norm(v).match(termPattern)?.[0].replace(/學年度第\s*([12一二])\s*學期/,"-$1").replace(/一/g,"1").replace(/二/g,"2").replace(/\s/g,"")||"";
 const nameKey=v=>{
   let title=norm(v).toLowerCase();
-  if(/個別化支持計畫|\bisp\b/u.test(title))title=title.replace(/(?:學)?系(?=[、，,）)」』\s]|$)/gu,"");
+  if(/個別化支持計畫|\bisp\b/u.test(title)){
+    title=title.replace(/(?:學)?系(?=[、，,）)」』\s]|$)/gu,"");
+    const short=title.match(/^([\p{Script=Han}]{2,10})[\s\-—:：]*isp$/u);
+    if(short)title="個別化支持計畫isp會議"+short[1];
+  }
   return title.replace(termPattern,"").replace(/^\d{3}年度\s*/,"")
-  .replace(/^(?:(?:申請|擬?請購|擬?核銷|擬?辦(?:理)?|健康與諮商中心|資源教室|教補身障|資教|身心障礙學生|特殊教育學生|購買|雜支|學年度|\d{3}年度)[\s\p{P}\p{S}]*)+/u,"")
+  .replace(/^(?:(?:申請|擬?請購|擬?核銷|擬?辦(?:理)?|健康與諮商中心|資源教室|教補身障|資教|身心障礙學生|特殊教育學生|購買|雜支|學年度|\d{3}年度?)[\s\p{P}\p{S}]*)+/u,"")
   .replace(/[×✕]/g,"x").replace(/戶外暨體驗/g,"戶外體驗").replace(/溼/g,"濕").replace(/橫桿/g,"橫槓").replace(/特推會/g,"特殊教育推行委員會")
+  .replace(/特教知能研習[\s\p{P}]*精神疾病(?:新時代)?的宏觀視野|精神疾病(?:新時代)?的宏觀視野[\s\p{P}]*特教知能研習|精神疾病(?:新時代)?的宏觀視野/gu,"精神疾病宏觀視野")
   .replace(/敬請(?:核示|核銷)[\s\p{P}]*$/u,"")
   .replace(/[^\p{L}\p{N}]/gu,"");
 };
-const core=v=>v.replace(/座談會議$/u,"座談會").replace(/(?:工作坊|活動|講座|會議|研討會|等|暨體驗)+$/u,"");
+const core=v=>v.replace(/座談會議$/u,"座談會").replace(/個案研討會$/u,"個案研討").replace(/(?:工作坊|活動|講座|會議|研討會|等|暨體驗)+$/u,"");
 const applicantKey=v=>norm(v).replace(/\s+/g,"");
 function samePerson(a,b){
   a=applicantKey(a);b=applicantKey(b);
@@ -107,16 +112,20 @@ export function calculateShots(rows,records){
     if(id.some(n=>!g.sharedParentIds.includes(n)))return null;
     const n=nameKey(r.name), term=termKey(r.name);
     const sameAmount=g.amount!==null&&Number(r.amount)===g.amount;
+    const draftZero=g.amount===0&&g.matchRows.length===1&&g.matchRows[0].kind==="purchase"&&/^(?:填寫中|新單)$/.test(g.matchRows[0].status);
     let rank=0;
     for(const s of g.matchRows){
       const sourceTerm=termKey(s.name);
       if(term&&sourceTerm&&term!==sourceTerm)continue;
       const person=samePerson(r.applicant,s.applicant), truncated=/(?:…|\.{2,})/.test(s.name);
       const key=nameKey(s.name), quoted=quotedTitle(s.name);
-      const match=titleRank(n,key,person,truncated);
+      const sameTerm=!!term&&term===sourceTerm;
+      const truncatedPrefix=truncated&&person&&n.startsWith(key)&&key.length>=(sameTerm?7:10);
+      const match=titleRank(n,key,person,truncated)||(truncatedPrefix?2:0);
       const alias=person&&sameAmount&&careerAlias(n,quoted?nameKey(quoted):key);
       const termBonus=term&&term===sourceTerm?2:0;
       if(sameAmount&&(match||alias))rank=Math.max(rank,(match||1)*10+termBonus+(person?1:0));
+      else if(draftZero&&person&&(match===3||truncatedPrefix))rank=Math.max(rank,4+termBonus);
       else if(match===3){
         const distinctive=core(n)===core(key)&&core(n).length>=10;
         if(person||distinctive)rank=Math.max(rank,5+termBonus+(person?1:0));
@@ -131,8 +140,9 @@ export function calculateShots(rows,records){
     const match=best.length===1&&candidates.filter(v=>v.some(c=>c.i===best[0].i&&c.rank>=rank)).length===1?best[0]:null;
     const r=match?recordsForMatch[match.i]:null;
     if(r)used.add(match.i);
-    const difference=r&&g.amount!==null?sum([Number(r.amount),-g.amount],x=>x):null;
-    const type=!r?(cs.length?"待人工確認":"會統有，資教待配對"):g.amount===null?"待核銷資料":difference!==0?"金額不同":"相符";
+    const pendingDraft=!!r&&g.amount===0&&Number(r.amount)!==0&&g.matchRows.length===1&&g.matchRows[0].kind==="purchase"&&/^(?:填寫中|新單)$/.test(g.matchRows[0].status);
+    const difference=r&&g.amount!==null&&!pendingDraft?sum([Number(r.amount),-g.amount],x=>x):null;
+    const type=!r?(cs.length?"待人工確認":"會統有，資教待配對"):g.amount===null?"待核銷資料":pendingDraft?"會統已建單，金額待確認":difference!==0?"金額不同":"相符";
     details.push({type,r,group:g.group,amount:g.amount,difference});
   });
   recordsForMatch.forEach((r,i)=>{if(!used.has(i))details.push({type:candidates.some(c=>c.some(x=>x.i===i))?"待人工確認":"資教有，本次會統未配對",r,group:[],amount:null,difference:null});});
