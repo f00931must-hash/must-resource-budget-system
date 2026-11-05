@@ -23,7 +23,7 @@ export function calculateShots(rows,records){
     }
     map.set(id,row);
   }
-  const active=[...map.values()].filter(r=>r.status!=="作廢"&&!sourceExcluded(r));
+  const active=[...map.values()].filter(r=>!/^(?:已)?作廢$/.test(r.status)&&!sourceExcluded(r));
   const kept=new Map(active.map(r=>[r.id,r])), links=new Map(active.map(r=>[r.id,new Set()]));
   const missing=new Set();
   for(const r of active)for(const id of r.related){
@@ -168,6 +168,42 @@ async function readPage(w,file,kind,page){
     });
   }finally{img.close();}
 }
+export function readCopiedTable(text,kind,page){
+  const lines=String(text).replace(/\r\n?/g,"\n").split("\n"), rows=[];
+  let columns=null, pending=null, tables=0;
+  const flush=()=>{
+    if(!pending||!columns)return;
+    const cols=pending.join("\n").split("\t").map(norm), at=k=>cols[columns[k]]||"";
+    const numbers=refs(columns.documents.map(i=>cols[i]||"").join(" "));
+    const primary=numbers.filter(id=>kind==="claim"?id.startsWith("G"):!id.startsWith("G"));
+    if(primary.length!==1||num(at("amount"))===null||!at("name")||!at("code"))
+      throw Error("有一列缺少完整的單號、案名、預算來源或金額，請重新複製完整表格。");
+    rows.push({kind,page,id:primary[0],related:numbers.filter(id=>id!==primary[0]).join("、"),
+      name:at("name"),status:at("status"),amount:at("amount"),code:at("code").replace(/\n+/g," "),applicant:at("applicant")});
+    pending=null;
+  };
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i], normalized=norm(line), cells=line.split("\t").map(norm);
+    if(cells.includes("案名")&&(cells.includes("金額")||cells.some(v=>/^(核銷|請購|申請|報支)金額$/.test(v)))){
+      const header=(/^\s*維護\t/.test(lines[i-1]||"")?lines[i-1]+"\n"+line:line).split("\t").map(v=>norm(v).replace(/\s+/g,""));
+      const index=re=>header.findIndex(v=>re.test(v));
+      const next={status:index(/^(現況|表單狀態|狀態)$/),name:index(/^案名$/),code:index(/^(預算來源|經費來源|預算編號)$/),
+        amount:index(kind==="claim"?/^(核銷金額|報支金額|金額)$/:/^(請購金額|申請金額|金額)$/),applicant:index(/^(申請人|承辦人|經辦人)$/),
+        documents:header.map((v,j)=>/^(單號|申請單號|核銷單號|請購單號|申請編號|核銷編號|請購編號|報支單號)$/.test(v)?j:-1).filter(j=>j>=0)};
+      if([next.status,next.name,next.code,next.amount].some(j=>j<0)||!next.documents.length)throw Error("表頭缺少必要欄位，請連同欄位標題一起複製。");
+      flush();columns=next;tables++;continue;
+    }
+    if(!columns)continue;
+    if(/^(?:新增紀錄|Copyright|表單現況說明|維護\t)/i.test(normalized)){flush();continue;}
+    const status=cells[columns.status]||"";
+    if(cells.length>columns.status&&/^(?:填寫中|簽核中|已決行|已完成|退回|已退回|作廢|已作廢|核銷中|待簽核|審核中|已核銷)$/.test(status)){
+      flush();pending=[line];
+    }else if(pending&&normalized&&!/^表單現況/.test(normalized))pending.push(line);
+  }
+  flush();
+  if(!tables||!rows.length)throw Error("未讀到"+kindName(kind)+"表格。請從會統複製包含表頭、完整資料列及金額的文字。");
+  return rows;
+}
 const fields=[["id","單號"],["related","關聯單號"],["name","案名"],["applicant","申請人"],["status","現況"],["amount","金額"],["code","預算來源"]];
 const kindName=k=>k==="purchase"?"請購":"核銷";
 function node(tag,text,attrs={}){
@@ -196,8 +232,10 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
   if(document.getElementById("budgetShotsDialog"))return;
   const dlg=node("dialog","",{id:"budgetShotsDialog","aria-labelledby":"budgetShotsTitle"});
   dlg.style.cssText="width:min(1150px,calc(100% - 24px));max-height:88vh;box-sizing:border-box;padding:20px";
-  dlg.innerHTML=`<h2 id="budgetShotsTitle">會統對帳｜截圖辨識</h2><p data-plan></p>
-    <p>分別一次選取請購、核銷的全部截圖。保留表頭、單號、金額、申請人與格線。圖片只在這個裝置辨識。</p>
+  dlg.innerHTML=`<h2 id="budgetShotsTitle">會統對帳｜貼上表格或截圖</h2><p data-plan></p>
+    <p>建議從會統複製表格文字，保留表頭。可逐頁貼上、逐頁加入；圖片也可辨識。</p>
+    <label>會統表格文字<textarea data-copy rows="5" style="display:block;width:100%;box-sizing:border-box" placeholder="在會統選取含表頭的表格，複製後貼在這裡"></textarea></label>
+    <p><button type="button" data-copy-p>加入請購表格</button> <button type="button" data-copy-c>加入核銷表格</button></p>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div><label>請購截圖 <input data-purchase type="file" multiple accept="image/png,image/jpeg,image/webp"></label><button type="button" data-paste-p>在此貼上請購截圖</button></div>
       <div><label>核銷截圖 <input data-claim type="file" multiple accept="image/png,image/jpeg,image/webp"></label><button type="button" data-paste-c>在此貼上核銷截圖</button></div>
@@ -234,7 +272,7 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
     pane.style.cssText="margin:8px 0;border:1px solid #ded6e9;border-radius:8px;padding:8px";
     if(!page.pane){el("pages").append(pane);page.pane=pane;}
     const title=node("summary",page.label+"｜"+(page.error?"未辨識，需檢查原圖":page.rows.length+" 列"));
-    const imageLink=node("a","開啟原圖",{href:page.url,target:"_blank",rel:"noopener"});
+    const imageLink=page.url?node("a","開啟原圖",{href:page.url,target:"_blank",rel:"noopener"}):node("small","來源：貼上的會統表格文字");
     const wrap=node("div");wrap.style.overflowX="auto";
     const table=node("table");table.style.cssText="width:100%;min-width:1000px";
     const header=node("tr");for(const [,l] of fields)header.append(node("th",l));header.append(node("th","移除"));table.append(header);
@@ -255,6 +293,20 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
     removePage.onclick=()=>{pages.splice(pages.indexOf(page),1);pane.remove();invalidate();};
     pane.replaceChildren(title,imageLink,page.error?node("p",page.error):node("span"),wrap,add,removePage);
     if(page.error)pane.open=true;
+  }
+  let copySequence=0;
+  for(const [key,kind] of [["copy-p","purchase"],["copy-c","claim"]]){
+    el(key).onclick=()=>{
+      if(busy||!valid())return;
+      if(el("copy").value.length>500000||pages.length>=60)return say("這批資料太多，請分批對帳。");
+      try{
+        const label=kindName(kind)+"｜貼上表格 "+(copySequence+1);
+        const rows=readCopiedTable(el("copy").value,kind,label);
+        const page={kind,label,rows};copySequence++;
+        pages.push(page);renderPage(page);invalidate();el("copy").value="";
+        say("已加入 "+rows.length+" 筆"+kindName(kind)+"資料。可以接著貼下一頁。");
+      }catch(e){say(e.message);}
+    };
   }
   const monitor=setInterval(()=>{if(!valid()&&dlg.open)dlg.close();},500);
   const active=()=>dlg.open&&valid();
@@ -289,8 +341,8 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
   el("calc").onclick=async()=>{
     if(busy||!active())return;
     invalidateResult();
-    if(!pages.length)return say("請先加入會統截圖。");
-    if(!el("verified").checked)return say("請先核對辨識結果並勾選確認。");
+    if(!pages.length)return say("請先加入會統表格或截圖。");
+    if(!el("verified").checked)return say("請先核對匯入結果並勾選確認。");
     const counts=[el("count-p").value,el("count-c").value];
     if(counts.some(x=>!/^\d+$/.test(x)))return say("請填寫會統兩邊顯示的總筆數。");
     lock(true);say("正在讀取目前計畫並對帳…");
@@ -299,7 +351,7 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
       const rows=pages.flatMap(p=>p.rows),records=await getRecords();
       if(!active())return;
       const calculated=calculateShots(rows,records);
-      if(calculated.purchases!==Number(counts[0])||calculated.claims!==Number(counts[1]))throw Error("筆數不符：辨識到請購 "+calculated.purchases+" 筆、核銷 "+calculated.claims+" 筆（已排除重複截圖列）。請檢查是否缺頁。");
+      if(calculated.purchases!==Number(counts[0])||calculated.claims!==Number(counts[1]))throw Error("筆數不符：辨識到請購 "+calculated.purchases+" 筆、核銷 "+calculated.claims+" 筆（已排除重複資料列）。請檢查是否缺頁。");
       result=calculated;
       const text="會統 "+cash(result.accounting)+" 元 ｜ 資教 "+cash(result.budget)+" 元 ｜ 差額 "+cash(result.delta)+" 元";
       el("result").append(node("p",text),node("p","已對上 "+result.details.filter(d=>d.type==="相符").length+" 組；其餘 "+result.details.filter(d=>d.type!=="相符").length+" 列請查看明細。"));
@@ -314,7 +366,7 @@ export function openShots({plan,valid,authorized,getRecords,saveSummary,download
   el("export").onclick=async()=>{
     if(!result||busy||!active())return;
     lock(true);
-    try{if(!await authorized()||!active())return;const data=await book(result);if(active())download(new Blob([data],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"會統截圖對帳.xlsx");}
+    try{if(!await authorized()||!active())return;const data=await book(result);if(active())download(new Blob([data],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"會統對帳.xlsx");}
     catch(e){say(e.message);}finally{lock(false);}
   };
   document.body.append(dlg);dlg.showModal();
