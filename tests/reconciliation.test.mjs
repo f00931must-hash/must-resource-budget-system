@@ -61,3 +61,23 @@ test('作廢及排除類別不計入，會議和差旅不因申請人員身分�
   assert.equal(r.accounting,500);
   assert.equal(r.budget,200);
 });
+
+test('案名簡寫：系所名稱、桌遊短名及職涯活動別名',()=>{
+  const accounting=[
+    claim('G20270101001','核銷個別化支持計畫(ISP)會議—資工系、半材系、時尚系',5088),
+    claim('G20270101002','擬辦理玩出職業想像-橫桿人生桌遊工作坊',10634),
+    claim('G20270101003','擬辦資源教室「職涯不迷航職涯諮詢與評估」...',35203),
+    claim('G20270101004','擬辦「職人工事參訪體驗活動」',42373)
+  ];
+  const records=[
+    local('個別化支持計畫(ISP)會議(資工、半材、時尚系)',5006),
+    local('橫槓人生桌遊',10422),
+    local('人生導航職涯諮詢與評估',35203),
+    local('橋接未來畢業生轉銜輔導座談會',8698)
+  ];
+  const r=calculateShots(accounting,records);
+  assert.deepEqual(r.details.filter(d=>d.r&&d.group.length).map(d=>[d.type,d.difference]),[['金額不同',-82],['金額不同',-212],['相符',0]]);
+  assert(exceptions(r).some(d=>d.group.some(s=>s.id==='G20270101004')&&!d.r));
+  assert(!calculateShots(accounting.slice(2,3),[local(records[2].name,35100)]).details.some(d=>d.r&&d.group.length));
+  assert(!calculateShots(accounting.slice(0,1),[local('個別化支持計畫(ISP)會議(資工、半材、機械系)',5006)]).details.some(d=>d.r&&d.group.length));
+});
