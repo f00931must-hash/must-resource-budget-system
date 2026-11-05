@@ -79,7 +79,7 @@
     <input type="hidden" id="recordId" />
     <label id="recordOwnerWrap" class="manager-only hidden">經費負責老師<select id="recordOwner"></select><small class="hint">管理員代為建立或修改時，可指定此筆經費屬於哪位老師；指定後該老師可修改自己的未鎖定紀錄。</small></label>
     <label>經費項目<select id="recordCategory" required></select></label>
-    <label>用途／摘要<input id="recordPurpose" required maxlength="120" placeholder="例如：A4影印紙" /></label>
+    <label>案名(與會統案名相同)<input id="recordPurpose" required maxlength="120" placeholder="例如：A4影印紙" /></label>
     <div class="two-cols"><label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label><label>學期<input id="recordSemester" required maxlength="5" pattern="\d{3}-[12]" placeholder="例如：114-2、115-1" /></label></div>
 
     <div id="recordActualAdjustmentWrap" class="panel hidden"><strong>已連結預支：原金額鎖定</strong><p>填寫實際支用金額與單據，由管理員確認後更正。退款另到「我的領款」申報。</p><label>實際金額申請<input id="recordProposedActualAmount" type="number" min="0" step="1" placeholder="需要送出實際金額時填寫"></label><label>說明<input id="recordAdjustmentReason" maxlength="300"></label><label class="check-row"><input id="recordAdjustmentAmountConfirm" type="checkbox"><span>確認單據金額與申請的實際金額相同</span></label></div>
