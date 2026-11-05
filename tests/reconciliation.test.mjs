@@ -81,3 +81,21 @@ test('案名簡寫：系所名稱、桌遊短名及職涯活動別名',()=>{
   assert(!calculateShots(accounting.slice(2,3),[local(records[2].name,35100)]).details.some(d=>d.r&&d.group.length));
   assert(!calculateShots(accounting.slice(0,1),[local('個別化支持計畫(ISP)會議(資工、半材、機械系)',5006)]).details.some(d=>d.r&&d.group.length));
 });
+
+test('整批重核：研習、影印、個案研討、ISP簡稱、截斷案名及零元草稿',()=>{
+  const p=(id,name,amount,status='已決行')=>({kind:'purchase',id,name,amount,status,related:'',applicant:'林測試',code:'006'});
+  const a=[
+    claim('G20270101001','擬核銷「特教知能研習—精神疾病新時代的宏觀視野」',5942),
+    claim('G20270101002','核銷-教補身障-資教-116年1-4月影印費。',6638),
+    claim('G20270101003','核銷-教補身障-資教-116-2學年度個案研討會',1840),
+    claim('G20270101004','核銷-教補身障-資教-身心障礙學生「個別化支持計畫(ISP)會議—電機系」,敬請核示。',3040),
+    p('120270101001','擬辦理117學年度第1學期特殊教育推行委...',11275),
+    p('120270101002','擬辦理「球來運轉,匹力全開」活動',0,'填寫中')
+  ];
+  const rs=[local('「精神疾病的宏觀視野」特教知能研習',5942),local('1-4月影印費',6638),
+    local('116-2個案研討',1840),local('電機系-ISP',3040),local('117-1特推會',11275),local('球來運轉，匹力全開',8145)];
+  const r=calculateShots(a,rs);
+  assert.equal(r.details.filter(d=>d.type==='相符').length,5);
+  assert.deepEqual(exceptions(r).map(d=>[d.type,d.difference]),[['會統已建單，金額待確認',null]]);
+  assert(!calculateShots(a.slice(3,4),[local('機械系-ISP',3040)]).details.some(d=>d.type==='相符'));
+});
