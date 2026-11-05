@@ -1,22 +1,38 @@
 const excluded=/助理人員服務費|輔導人員費|課業輔導鐘點費/;
 const norm=v=>String(v??"").normalize("NFKC").trim();
-const nameKey=v=>norm(v).toLowerCase()
-  .replace(/^(?:(?:申請|請購|擬核銷|核銷|擬?辦理|資源教室|教補身障|資教)[\s\p{P}\p{S}]*)+/u,"")
-  .replace(/溼/g,"濕").replace(/[^\p{L}\p{N}]/gu,"");
-// Accept an abbreviated title only when its distinctive wording survives in the same order.
-function abbreviatedName(a,b){
-  if(a.length>b.length)[a,b]=[b,a];
-  if(a.length<5||a.length===b.length||a.length*2<b.length)return false;
-  if(!/\p{Script=Han}/u.test(a))return false;
-  let i=0;for(const ch of b)if(ch===a[i])i++;
-  if(i!==a.length)return false;
-  const meaningful=s=>s.replace(/合理調整|推廣文宣品|宣導品|資源教室|會議|工作坊|研習|活動|費用|經費|年度|學年度|學期|採購|用品|耗材/g,"");
-  const x=meaningful(a),y=meaningful(b);
-  if(x.length<3||y.length<3)return false;
-  for(let j=0;j+3<=x.length;j++)if(y.includes(x.slice(j,j+3)))return true;
-  return false;
-}
+const termPattern=/(?:\d{3})\s*(?:[-－]\s*[12](?!\d)|學年度第\s*[12一二]\s*學期)/;
+const termKey=v=>norm(v).match(termPattern)?.[0].replace(/學年度第\s*([12一二])\s*學期/,"-$1").replace(/一/g,"1").replace(/二/g,"2").replace(/\s/g,"")||"";
+const nameKey=v=>norm(v).toLowerCase().replace(termPattern,"").replace(/^\d{3}年度\s*/,"")
+  .replace(/^(?:(?:申請|擬?請購|擬?核銷|擬?辦(?:理)?|健康與諮商中心|資源教室|教補身障|資教|身心障礙學生|特殊教育學生|購買|雜支|學年度|\d{3}年度)[\s\p{P}\p{S}]*)+/u,"")
+  .replace(/溼/g,"濕").replace(/橫桿/g,"橫槓").replace(/特推會/g,"特殊教育推行委員會")
+  .replace(/敬請(?:核示|核銷)[\s\p{P}]*$/u,"")
+  .replace(/[^\p{L}\p{N}]/gu,"");
+const core=v=>v.replace(/座談會議$/u,"座談會").replace(/(?:工作坊|活動|講座|會議|研討會|等|暨體驗)+$/u,"");
 const applicantKey=v=>norm(v).replace(/\s+/g,"");
+function samePerson(a,b){
+  a=applicantKey(a);b=applicantKey(b);
+  return a.length>=2&&b.length>=2&&(a===b||
+    (Math.abs(a.length-b.length)===1&&(a.endsWith(b)||b.endsWith(a))));
+}
+const itemKey=s=>s.includes("及")?s.split("及").sort().join("及"):s;
+function titleRank(a,b,person,truncated){
+  if(a.length>b.length)[a,b]=[b,a];
+  if(a.length<4)return 0;
+  if(a===b&&!truncated)return 3;
+  const numbers=s=>s.match(/\d+/g)?.join(',')||'';
+  if(numbers(a)&&numbers(b)&&numbers(a)!==numbers(b))return 0;
+  const x=core(a),y=core(b);
+  if(x.length>=4&&!truncated&&(x===y||itemKey(x)===itemKey(y)))return 3;
+  if(truncated&&person&&a.length>=8&&a.length*2>=b.length&&b.startsWith(a))return 2;
+  if(truncated)return 0;
+  if(x.length>=4&&y.length>=4&&(x.includes(y)||y.includes(x))&&Math.min(x.length,y.length)*2>=Math.max(x.length,y.length))return 2;
+  if(!person||a.length<5||a.length*2<b.length)return 0;
+  let i=0;for(const ch of b)if(ch===a[i])i++;
+  const meaningful=s=>s.replace(/合理調整|推廣文宣品|宣導品|資源教室|會議|工作坊|研習|活動|費用|經費|年度|學期|採購|用品|耗材/g,"");
+  const m=meaningful(a),n=meaningful(b);
+  if(i===a.length&&m.length>=3&&Array.from({length:m.length-2},(_,j)=>m.slice(j,j+3)).some(k=>n.includes(k)))return 2;
+  return 0;
+}
 const cash=n=>Number(n).toLocaleString("zh-TW",{maximumFractionDigits:2});
 const num=v=>{const raw=norm(v),s=raw.replace(/,/g,"");return /^-?(?:\d+|\d{1,3}(?:,\d{3})+)(\.\d{1,2})?$/.test(raw)&&Number.isSafeInteger(Math.round(Number(s)*100))?Number(s):null;};
 const sum=(rs,f)=>rs.reduce((n,r)=>n+Math.round(f(r)*100),0)/100;
@@ -68,17 +84,19 @@ export function calculateShots(rows,records){
   const recordsForMatch=records.filter(r=>!excluded.test(r.category));
   const candidates=groups.map(g=>recordsForMatch.map((r,i)=>{
     const id=refs([r.accountingId,r.note,r.name].join(" "));
-    if(g.group.some(s=>id.includes(s.id)))return {i,rank:4};
+    if(g.group.some(s=>id.includes(s.id)))return {i,rank:100};
     if(id.length)return null;
-    const n=nameKey(r.name), applicant=applicantKey(r.applicant);
-    if(n.length<4)return null;
+    const n=nameKey(r.name), term=termKey(r.name);
     const sameAmount=g.amount!==null&&Number(r.amount)===g.amount;
     let rank=0;
     for(const s of g.group){
-      if(/(?:…|\.{2,})/.test(s.name))continue;
-      const key=nameKey(s.name), sameApplicant=!!applicant&&applicant===applicantKey(s.applicant);
-      if(key===n&&(sameAmount||sameApplicant))rank=Math.max(rank,sameAmount?3:1);
-      else if(sameAmount&&sameApplicant&&abbreviatedName(n,key))rank=Math.max(rank,2);
+      const sourceTerm=termKey(s.name);
+      if(term&&sourceTerm&&term!==sourceTerm)continue;
+      const person=samePerson(r.applicant,s.applicant), truncated=/(?:…|\.{2,})/.test(s.name);
+      const match=titleRank(n,nameKey(s.name),person,truncated);
+      const termBonus=term&&term===sourceTerm?2:0;
+      if(sameAmount&&match)rank=Math.max(rank,match*10+termBonus+(person?1:0));
+      else if(match===3&&person)rank=Math.max(rank,5+termBonus);
     }
     return rank?{i,rank}:null;
   }).filter(Boolean));
