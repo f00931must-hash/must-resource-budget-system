@@ -66,7 +66,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
   button.disabled=true;
   try{
     if(!await authorized())return toast("無法確認經費管理員權限，請確認連線或重新登入",5000);
-    const {openReconciliation}=await import(new URL("./budget-reconciliation.js?v=2",document.baseURI).href);
+    const {openReconciliation}=await import(new URL("./budget-reconciliation.js?v=3",document.baseURI).href);
     if(!valid())return;
     openReconciliation({
       plan:currentPlan()?.name||"目前計畫", valid, authorized,
