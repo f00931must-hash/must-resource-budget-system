@@ -99,3 +99,13 @@ test('整批重核：研習、影印、個案研討、ISP簡稱、截斷案名�
   assert.deepEqual(exceptions(r).map(d=>[d.type,d.difference]),[['會統已建單，金額待確認',null]]);
   assert(!calculateShots(a.slice(3,4),[local('機械系-ISP',3040)]).details.some(d=>d.type==='相符'));
 });
+
+test('零元請購的引號案名中途截斷，合併成金額待確認',()=>{
+  const p={kind:'purchase',id:'120270101001',name:'擬辦特教知能研習——「公平,不是每個人都...',amount:0,status:'填寫中',related:'',applicant:'林測試',code:'006'};
+  const r=local('「公平，不是每個人都一樣：談大專校園中的合理調整與融合共學」特教知能研習',9401,{stage:'請購中'});
+  const x=calculateShots([p],[r]);
+  assert.deepEqual(exceptions(x).map(d=>[d.type,d.difference]),[['會統已建單，金額待確認',null]]);
+  assert.equal(x.accounting,0);
+  assert(!calculateShots([p],[{...r,applicant:'其他老師'}]).details.some(d=>d.r&&d.group.length));
+  assert(!calculateShots([p],[r,{...r}]).details.some(d=>d.r&&d.group.length));
+});
