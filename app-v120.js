@@ -497,7 +497,7 @@ async function saveRecord(e){
       data.actualAdjustment={status:"pending",amount:proposedAmount,reason,requestedBy:state.user.email.toLowerCase(),requestedAt:serverTimestamp()};
     }
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
-    if(id)await updateDoc(doc(db,"expenseRecords",id),data); else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
+    if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     if(isManager()&&existing&&String(existing.ownerEmail||"").toLowerCase()!==recordOwner.email){
       await addDoc(collection(db,"auditLogs"),{
         type:"expense-owner",targetId:id,planId:state.activePlanId,action:"change-owner",
