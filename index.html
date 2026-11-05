@@ -7,9 +7,21 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=1.6.7" />
   <link rel="stylesheet" href="./styles.css?v=1.6.8" />
   <style>
-    #records .review-filters > * { min-width: 0; }
-    @media (min-width: 1001px) {
-      #records .review-filters { grid-template-columns: minmax(0,1.15fr) minmax(0,.75fr) minmax(0,1.05fr) minmax(0,1.05fr) minmax(0,.9fr) minmax(0,1.25fr); }
+    #records .records-tools { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:14px; align-items:start; margin-bottom:14px; }
+    #records .records-controls { min-width:0; margin-left:auto; width:100%; max-width:560px; grid-column:2; }
+    #records .review-filters { grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; padding:10px; margin-bottom:8px; }
+    #records .review-filters > * { min-width:0; padding:7px 8px; font-size:13px; }
+    #records .record-tools-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+    #records .record-tools-actions button { padding:7px 10px; font-size:13px; }
+    #budgetLatestReconciliation h3 { margin:0 0 5px; font-size:16px; }
+    #budgetLatestReconciliation dl:not([hidden]) { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:10px 0 0; }
+    #budgetLatestReconciliation dt { color:#625570; font-size:12px; }
+    #budgetLatestReconciliation dd { margin:3px 0 0; font-weight:700; }
+    #budgetLatestReconciliationStatus { margin:0; font-size:12px; color:#625570; }
+    @media(max-width:760px) {
+      #records .records-tools { grid-template-columns:minmax(0,1fr); }
+      #records .records-controls { grid-column:1; max-width:none; }
+      #records .review-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -49,17 +61,29 @@
       </section>
 
       <section id="records" class="view">
-        <div class="section-head responsive-head">
-          <div><h2>使用紀錄</h2><p id="recordsHint">登錄經費使用紀錄。</p></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button id="batchDownloadBtn" class="ghost-btn manager-only hidden">批次下載核銷單據</button><button id="downloadBudgetExcelBtn" class="ghost-btn manager-only hidden">下載 Excel</button><button id="budgetReconciliationBtn" class="ghost-btn manager-only hidden" type="button">會統對帳</button><button id="newRecordBtn" class="primary-btn">＋ 新增使用紀錄</button></div>
-        </div>
-        <div class="panel filters review-filters">
+        <div class="section-head responsive-head"><div><h2>使用紀錄</h2><p id="recordsHint">登錄經費使用紀錄。</p></div></div>
+        <div class="records-tools">
+          <aside id="budgetLatestReconciliation" class="panel manager-only hidden" aria-label="最新會統對帳">
+            <h3>最新會統對帳</h3>
+            <p id="budgetLatestReconciliationStatus" role="status">讀取最近一次對帳…</p>
+            <dl id="budgetLatestReconciliationValues" hidden>
+              <div><dt>核對日期</dt><dd id="budgetLatestDate"></dd></div>
+              <div><dt>差額（資教－會統）</dt><dd id="budgetLatestDelta"></dd></div>
+              <div><dt>會統請購＋核銷（已去重）</dt><dd id="budgetLatestAccounting"></dd></div>
+              <div><dt>經費系統已核銷＋已預估</dt><dd id="budgetLatestSystem"></dd></div>
+            </dl>
+          </aside>
+          <div class="records-controls">
+            <div class="panel filters review-filters">
           <select id="filterCategory"><option value="">全部經費項目</option></select>
           <select id="filterSemester"><option value="">全部學期</option></select>
           <select id="filterReview"><option value="">全部核銷狀態</option><option value="pending">待核對</option><option value="approved">已核銷</option><option value="estimated">預估／請購中／核銷中</option></select>
           <select id="filterIssue"><option value="">全部資料狀態</option><option value="missingVoucher">缺少核銷單據</option><option value="unconfirmed">未確認 Key 金額</option></select>
           <select id="filterTeacher" aria-label="依老師篩選"><option value="">全部老師</option></select>
           <input id="searchInput" aria-label="搜尋案名或學期" placeholder="搜尋案名或學期" />
+        </div>
+            <div class="record-tools-actions"><button id="batchDownloadBtn" class="ghost-btn manager-only hidden">批次下載核銷單據</button><button id="downloadBudgetExcelBtn" class="ghost-btn manager-only hidden">下載 Excel</button><button id="budgetReconciliationBtn" class="ghost-btn manager-only hidden" type="button">會統對帳</button><button id="newRecordBtn" class="primary-btn">＋ 新增使用紀錄</button></div>
+          </div>
         </div>
         <div id="recordList" class="record-list"></div>
       </section>

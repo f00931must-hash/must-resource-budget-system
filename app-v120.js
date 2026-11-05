@@ -66,9 +66,9 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
   button.disabled=true;
   try{
     if(!await authorized())return toast("無法確認經費管理員權限，請確認連線或重新登入",5000);
-    const {openReconciliation}=await import(new URL("./budget-reconciliation.js?v=3",document.baseURI).href);
+    const {openShots}=await import(new URL("./budget-reconciliation-shots.js?v=1",document.baseURI).href);
     if(!valid())return;
-    openReconciliation({
+    openShots({
       plan:currentPlan()?.name||"目前計畫", valid, authorized,
       async getRecords(){
         if(!valid())throw new Error("計畫或登入帳號已變更。");
@@ -83,6 +83,11 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
           applicant:budgetUserName(r.ownerEmail,r.ownerName),
           accountingId:r.accountingId
         }));
+      },
+      async saveSummary(result){
+        if(!valid())throw new Error("計畫或登入帳號已變更。");
+        await addDoc(collection(db,"auditLogs"),{type:"budget-reconciliation-summary",planId,actorEmail:email,createdAt:serverTimestamp(),accounting:result.accounting,budget:result.budget,delta:result.delta});
+        if(valid())await refreshBudgetReconciliationSummary();
       },
       download:downloadBudgetBlob
     });
@@ -205,6 +210,32 @@ async function loadPlanData(){
   state.records=recSnap.docs.map(d=>({id:d.id,...d.data()}));
 }
 
+let budgetSummaryRequest=0;
+async function refreshBudgetReconciliationSummary(){
+  const panel=$("budgetLatestReconciliation"), status=$("budgetLatestReconciliationStatus"), values=$("budgetLatestReconciliationValues");
+  const planId=state.activePlanId, uid=state.user?.uid, n=++budgetSummaryRequest;
+  if(!panel||!status||!values||!isManager())return;
+  if(panel.dataset.planId!==planId){panel.dataset.planId=planId||"";values.hidden=true;status.textContent="讀取最近一次對帳…";}
+  if(!planId){status.textContent="請先選擇計畫。";values.hidden=true;return;}
+  const current=()=>n===budgetSummaryRequest&&isManager()&&state.activePlanId===planId&&state.user?.uid===uid&&auth.currentUser?.uid===uid;
+  try{
+    const snap=await getDocsFromServer(query(collection(db,"auditLogs"),where("planId","==",planId),where("type","==","budget-reconciliation-summary")));
+    if(!current())return;
+    const latest=snap.docs.map(d=>d.data()).filter(r=>r.createdAt?.toDate&&[r.accounting,r.budget,r.delta].every(Number.isFinite))
+      .sort((a,b)=>b.createdAt.toMillis()-a.createdAt.toMillis()||(b.createdAt.nanoseconds||0)-(a.createdAt.nanoseconds||0))[0];
+    values.hidden=!latest;
+    status.textContent=latest?"顯示對帳當下的金額；兩邊沿用排除三類費用。":"這個計畫還沒有已確認的截圖對帳。";
+    if(!latest)return;
+    const fmt=new Intl.NumberFormat("zh-TW",{maximumFractionDigits:2});
+    $("budgetLatestDate").textContent=new Intl.DateTimeFormat("zh-TW",{dateStyle:"short",timeStyle:"short",timeZone:"Asia/Taipei"}).format(latest.createdAt.toDate());
+    $("budgetLatestAccounting").textContent=fmt.format(latest.accounting)+" 元";
+    $("budgetLatestSystem").textContent=fmt.format(latest.budget)+" 元";
+    $("budgetLatestDelta").textContent=(latest.delta>0?"+":"")+fmt.format(latest.delta)+" 元";
+  }catch(e){
+    if(current()){status.textContent="暫時無法讀取最新對帳，請稍後重試。";console.error(e);}
+  }
+}
+
 function renderAll(){
   renderPlanSelect();
   renderDashboard();
@@ -212,6 +243,7 @@ function renderAll(){
   renderSemesterOptions();
   renderTeacherOptions();
   renderRecords();
+  if($("records")?.classList.contains("active-view"))void refreshBudgetReconciliationSummary();
   updatePlanLocks();
   if(isManager()) renderCategoryAdmin();
 }
@@ -960,6 +992,7 @@ async function deleteCategory(id){
 }
 
 function switchView(id){
+  if(id==="records")void refreshBudgetReconciliationSummary();
   document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active-view",v.id===id));
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.view===id));
 }
