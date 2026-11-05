@@ -553,9 +553,11 @@ async function saveRecord(e){
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
   }
-  let uploaded=null; const oldPath=existing?.voucherPath||existing?.voucherStoragePath||githubPathFromUrl(oldUrl);
+  let uploaded=null, recordSaved=false, saveStep="附件上傳"; const oldPath=existing?.voucherPath||existing?.voucherStoragePath||githubPathFromUrl(oldUrl);
   try{
     if(file){ $("recordSaveBtn").disabled=true; $("recordSaveBtn").textContent="附件上傳中…"; uploaded=await uploadVoucherFile(file); }
+    if(file&&!uploaded?.url)throw new Error("上傳服務未回傳核銷單據連結，請重新選擇檔案再試。");
+    saveStep="紀錄寫入";
     const data={planId:state.activePlanId,categoryId,purpose:$("recordPurpose").value.trim(),amount,semester,estimated,
       archived:estimated?false:$("recordArchived").checked,amountConfirmed:estimated?false:$("recordAmountConfirm").checked,
       reviewStatus:estimated?"estimated":"pending",reviewed:false,locked:false,note:$("recordNote").value.trim(),
@@ -568,6 +570,8 @@ async function saveRecord(e){
     }
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
+    recordSaved=true;
+    saveStep="畫面更新";
     if(isManager()&&existing&&String(existing.ownerEmail||"").toLowerCase()!==recordOwner.email){
       await addDoc(collection(db,"auditLogs"),{
         type:"expense-owner",targetId:id,planId:state.activePlanId,action:"change-owner",
@@ -579,7 +583,10 @@ async function saveRecord(e){
     if(file&&oldPath&&oldPath!==uploaded.path)await githubDeleteFile(oldPath,existing?.voucherFileName||"voucher").catch(()=>{});
     $("recordDialog").close(); await loadPlanData(); renderAll(); toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");
   }catch(err){
-    console.error(err); if(uploaded?.path)await githubDeleteFile(uploaded.path,uploaded.name).catch(()=>{}); toast(`儲存失敗：${err.message}`,6000);
+    console.error(err);
+    if(!recordSaved&&uploaded?.path&&uploaded.path!==oldPath)await githubDeleteFile(uploaded.path,uploaded.name).catch(()=>{});
+    if(recordSaved)toast("紀錄已儲存，但畫面更新失敗，請重新整理確認。",8000);
+    else toast(`${saveStep}失敗：${err.message}`,8000);
   }finally{ $("recordSaveBtn").disabled=false; $("recordSaveBtn").textContent="儲存"; }
 }
 
