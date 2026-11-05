@@ -120,7 +120,11 @@ export function calculateShots(rows,records){
       const person=samePerson(r.applicant,s.applicant), truncated=/(?:…|\.{2,})/.test(s.name);
       const key=nameKey(s.name), quoted=quotedTitle(s.name);
       const sameTerm=!!term&&term===sourceTerm;
-      const truncatedPrefix=truncated&&person&&n.startsWith(key)&&key.length>=(sameTerm?7:10);
+      const quoteFragment=truncated&&!quoted?norm(s.name).match(/[「『“"]([^」』”"]+?)(?:…+|\.{2,})\s*$/u)?.[1]:"";
+      const quoteKey=quoteFragment?nameKey(quoteFragment):"";
+      const localQuote=quotedTitle(r.name);
+      const quotePrefix=quoteKey.length>=8&&(localQuote?nameKey(localQuote):n).startsWith(quoteKey);
+      const truncatedPrefix=truncated&&person&&((n.startsWith(key)&&key.length>=(sameTerm?7:10))||quotePrefix);
       const match=titleRank(n,key,person,truncated)||(truncatedPrefix?2:0);
       const alias=person&&sameAmount&&careerAlias(n,quoted?nameKey(quoted):key);
       const termBonus=term&&term===sourceTerm?2:0;
