@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, getDoc, getDocs, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCsApWkpnJiwCsQsiPK14pgFQdqb88UJjQ",
@@ -48,6 +48,45 @@ $("recordVoucherFile").addEventListener("change", ()=>{
 });
 $("batchDownloadBtn").addEventListener("click", batchDownloadVouchers);
 $("downloadBudgetExcelBtn")?.addEventListener("click", downloadBudgetExcel);
+
+$("budgetReconciliationBtn")?.addEventListener("click", async event=>{
+  const button=event.currentTarget, uid=state.user?.uid, planId=state.activePlanId;
+  const email=String(state.user?.email||"").toLowerCase();
+  if(!isManager() || !uid || !email)return toast("此功能僅限經費管理員使用",5000);
+  if(!planId)return toast("請先選擇計畫");
+  const valid=()=>isManager()&&state.user?.uid===uid&&auth.currentUser?.uid===uid&&state.activePlanId===planId;
+  const authorized=async()=>{
+    if(!valid())return false;
+    try{
+      const snap=await getDocFromServer(doc(db,"users",email));
+      return valid()&&snap.exists()&&snap.data().enabled===true&&snap.data().role==="manager";
+    }catch{return false;}
+  };
+  button.disabled=true;
+  try{
+    if(!await authorized())return toast("無法確認經費管理員權限，請確認連線或重新登入",5000);
+    const {openReconciliation}=await import(new URL("./budget-reconciliation.js?v=1",document.baseURI).href);
+    if(!valid())return;
+    openReconciliation({
+      plan:currentPlan()?.name||"目前計畫", valid, authorized,
+      async getRecords(){
+        if(!valid())throw new Error("計畫或登入帳號已變更。");
+        const [records,categories]=await Promise.all(["expenseRecords","budgetCategories"].map(
+          name=>getDocsFromServer(query(collection(db,name),where("planId","==",planId)))
+        ));
+        if(!valid())throw new Error("計畫或登入帳號已變更。");
+        const names=new Map(categories.docs.map(d=>[d.id,d.data().name]));
+        return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
+          name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
+          amount:r.amount, stage:recordStageText(r), semester:r.semester, note:r.note,
+          accountingId:r.accountingId
+        }));
+      },
+      download:downloadBudgetBlob
+    });
+  }catch(error){toast("開啟會統對帳失敗："+error.message,5000);}
+  finally{button.disabled=false;}
+});
 
 onAuthStateChanged(auth, async user=>{
   const nextAccount=user?.uid||"";
