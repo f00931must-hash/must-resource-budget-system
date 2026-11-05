@@ -146,7 +146,7 @@ function book(result){
 export function openShots({plan,draftKey,valid,authorized,getRecords,saveSummary,download}){
   if(document.getElementById("budgetShotsDialog"))return;
   const dlg=node("dialog","",{id:"budgetShotsDialog","aria-labelledby":"budgetShotsTitle"});
-  dlg.style.cssText="width:min(1150px,calc(100% - 24px));max-height:88vh;box-sizing:border-box;padding:20px";
+  dlg.style.cssText="position:fixed;inset:0;margin:auto;transform:none;width:min(1150px,calc(100vw - 24px));max-width:calc(100vw - 24px);height:fit-content;max-height:88vh;overflow:auto;box-sizing:border-box;padding:clamp(12px,2vw,20px)";
   dlg.innerHTML=`<h2 id="budgetShotsTitle">會統對帳｜貼上表格</h2><p data-plan></p>
     <p>在會統逐頁按 Ctrl+A、Ctrl+C，再貼到這裡加入。系統會自動統計去重後的筆數。</p>
     <label>會統表格文字<textarea data-copy rows="5" style="display:block;width:100%;box-sizing:border-box" placeholder="在會統選取含表頭的表格，複製後貼在這裡"></textarea></label>
@@ -156,8 +156,8 @@ export function openShots({plan,draftKey,valid,authorized,getRecords,saveSummary
     <p data-status role="status" style="white-space:pre-wrap"></p>
     <p data-counts aria-live="polite">已加入：請購 0 筆、核銷 0 筆</p><div data-pages></div>
     <div style="margin-top:16px;padding:14px;background:#f5effa;border:1px solid #ddcce9;border-radius:10px">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:700;margin:0 0 12px">
-        <input data-verified type="checkbox" style="width:22px;min-width:22px;height:22px;flex:0 0 22px;margin:0;padding:0;accent-color:#7653a6">
+      <label style="display:grid!important;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:10px;cursor:pointer;font-weight:700;margin:0 0 12px">
+        <input data-verified type="checkbox" style="width:22px!important;min-width:22px!important;max-width:22px!important;height:22px!important;margin:0!important;padding:0!important;justify-self:start;accent-color:#7653a6">
         <span>我已核對全部頁面，確認單號、關聯單號、金額與狀態正確</span>
       </label>
       <button type="button" class="primary-btn" data-calc>計算並儲存本次對帳</button>
