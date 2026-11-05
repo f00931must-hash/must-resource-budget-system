@@ -173,11 +173,21 @@ export function readCopiedTable(text,kind,page){
   let columns=null, pending=null, tables=0;
   const flush=()=>{
     if(!pending||!columns)return;
-    const cols=pending.join("\n").split("\t").map(norm), at=k=>cols[columns[k]]||"";
+    let joined=pending[0];
+    for(const line of pending.slice(1)){
+      const left=joined.split("\t"), right=line.split("\t");
+      // The claim page sometimes copies the boundary after the related IDs as a line break.
+      const missingTab=kind==="claim"&&columns.related>=0&&columns.related+1===columns.name
+        &&left.length===columns.name&&/^(?:申請|請購)單號\s*[:：]/.test(norm(left.at(-1)))
+        &&norm(right[0])&&!/^(?:(?:申請|請購)單號|傳票編號)\s*[:：]/.test(norm(right[0]))
+        &&num(right[columns.amount-columns.name])!==null;
+      joined+=(missingTab?"\t":"\n")+line;
+    }
+    const cols=joined.split("\t").map(norm), at=k=>cols[columns[k]]||"";
     const numbers=refs(columns.documents.map(i=>cols[i]||"").join(" "));
     const primary=numbers.filter(id=>kind==="claim"?id.startsWith("G"):!id.startsWith("G"));
     if(primary.length!==1||num(at("amount"))===null||!at("name")||(kind==="purchase"&&!at("code")))
-      throw Error("有一列缺少完整的單號、案名或金額（請購另需預算來源），請重新複製完整表格。");
+      throw Error("第 "+(rows.length+1)+" 筆"+(primary[0]?"（"+primary[0]+"）":"")+"缺少完整的單號、案名或金額"+(kind==="purchase"?"（請購另需預算來源）":"")+"，請檢查這一列。");
     rows.push({kind,page,id:primary[0],related:numbers.filter(id=>id!==primary[0]).join("、"),
       name:at("name"),status:at("status"),amount:at("amount"),code:at("code").replace(/\n+/g," "),applicant:at("applicant")});
     pending=null;
@@ -187,7 +197,7 @@ export function readCopiedTable(text,kind,page){
     if(cells.includes("案名")&&(cells.includes("金額")||cells.some(v=>/^(核銷|請購|申請|報支)金額$/.test(v)))){
       const header=(/^\s*維護\t/.test(lines[i-1]||"")?lines[i-1]+"\n"+line:line).split("\t").map(v=>norm(v).replace(/[\s▼▲▽△↕]+/g,""));
       const index=re=>header.findIndex(v=>re.test(v));
-      const next={status:index(/^(現況|表單狀態|狀態)$/),name:index(/^案名$/),code:index(/^(預算來源|經費來源|預算編號)$/),
+      const next={related:index(/^相關編號$/),status:index(/^(現況|表單狀態|狀態)$/),name:index(/^案名$/),code:index(/^(預算來源|經費來源|預算編號)$/),
         amount:index(kind==="claim"?/^(核銷金額|報支金額|金額)$/:/^(請購金額|申請金額|金額)$/),applicant:index(/^(申請人|承辦人|經辦人)$/),
         documents:header.map((v,j)=>/^(單號|申請單號|本核銷單號|核銷單號|請購單號|申請編號|核銷編號|請購編號|報支單號|相關編號)$/.test(v)?j:-1).filter(j=>j>=0)};
       if([next.status,next.name,next.amount,...(kind==="purchase"?[next.code]:[])].some(j=>j<0)||!next.documents.length)throw Error("表頭缺少必要欄位，請連同欄位標題一起複製。");
