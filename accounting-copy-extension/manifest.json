@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "資教｜會統清單一鍵複製",
+  "version": "0.1.0",
+  "description": "從已登入的會統清單逐頁收集表格文字，供資教經費系統對帳使用。",
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "action": { "default_popup": "popup.html" }
+}
