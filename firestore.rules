@@ -430,6 +430,39 @@ service cloud.firestore {
           )
         );
 
+      // Managers review or reopen any active expense without changing its owner,
+      // financial fields, voucher, or advance allocation.
+      allow update: if enabledUser() && manager()
+        && resource.data.get('deleted', false) == false
+        && resource.data.get('estimated', false) == false
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && (
+          (
+            !recordLocked()
+            && hasVoucher(resource.data)
+            && amountConfirmed(resource.data)
+            && request.resource.data.reviewStatus == 'approved'
+            && request.resource.data.reviewed == true
+            && request.resource.data.locked == true
+            && request.resource.data.reviewedAt == request.time
+            && request.resource.data.reviewedBy == email()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reviewStatus','reviewed','locked','reviewedAt','reviewedBy','updatedAt','updatedBy'
+            ])
+          ) || (
+            recordLocked()
+            && request.resource.data.reviewStatus == 'pending'
+            && request.resource.data.reviewed == false
+            && request.resource.data.locked == false
+            && request.resource.data.unlockedAt == request.time
+            && request.resource.data.unlockedBy == email()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reviewStatus','reviewed','locked','unlockedAt','unlockedBy','updatedAt','updatedBy'
+            ])
+          )
+        );
+
       // Managers can attach a confirmed voucher on behalf of the record owner.
       // Keep the expense amount, owner and advance allocation intact.
       allow update: if enabledUser() && manager()
