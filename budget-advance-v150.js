@@ -9,7 +9,7 @@ import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, query, where,
-  addDoc, updateDoc, writeBatch, serverTimestamp
+  addDoc, updateDoc, writeBatch, runTransaction, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID="must-resource-budget-system";
@@ -467,8 +467,8 @@ function render(){
   for(const a of aa){
     estimateTotal+=num(a.estimatedAmount);
     const r=recordForAllocation(a);
-    if(r&&isActual(r)){actualTotal+=num(r.amount);projectedTotal+=num(r.amount);actualCount++;}
-    else projectedTotal+=num(a.estimatedAmount);
+    if(r&&isActual(r)){actualTotal+=num(r.amount)+num(r.advanceTopUpTotal);projectedTotal+=num(r.amount)+num(r.advanceTopUpTotal);actualCount++;}
+    else projectedTotal+=num(a.estimatedAmount)+num(a.advanceTopUpTotal);
   }
   const total=num(b.totalAmount);
   const unallocated=total-estimateTotal+aa.reduce((sum,a)=>sum+confirmedRefund(a,recordForAllocation(a)),0);
@@ -524,8 +524,8 @@ function render(){
   if(!aa.length){$("advanceAllocationList").innerHTML='<div class="empty">尚未分配活動。</div>';return;}
   $("advanceAllocationList").innerHTML=aa.map(a=>{
     const r=recordForAllocation(a);
-    const actual=r&&isActual(r)?num(r.amount):null;
-    const variance=actual===null?null:num(a.estimatedAmount)-actual;
+    const actual=r&&isActual(r)?num(r.amount)+num(r.advanceTopUpTotal):null;
+    const variance=actual===null?null:num(a.estimatedAmount)+num(a.advanceTopUpTotal)-actual;
     const status=!r?'找不到使用紀錄':r.estimated===true?'預估中':isApproved(r)?'已核銷・已鎖定':'已轉實際・待核對';
     const varianceHtml=variance===null?'—':variance===0?'<span class="variance-zero">剛好</span>':variance>0?`<span class="variance-positive">多估 ${money.format(variance)}</span>`:`<span class="variance-negative">少估 ${money.format(Math.abs(variance))}</span>`;
     const canEdit=false;
@@ -540,9 +540,12 @@ function render(){
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small>${settlementMarkup(a,r,true)}</div>
       <div>${!a.payoutSplit&&!receiptConfirmed&&String(a.ownerEmail||"").toLowerCase()===currentEmail?`<button class="primary-btn" data-manager-own-receipt="${a.id}">確認收到分配金額</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
+      <div><small>追加預支</small> <strong>${money.format(a.advanceTopUpTotal||0)}</strong> ・ 含追加合計 ${money.format(num(a.estimatedAmount)+num(a.advanceTopUpTotal))}
+      ${!ownOnly&&r?'<button type="button" class="link-btn" data-advance-topup="'+escAttr(a.id)+'">登記追加預支</button>':""}</div>
       ${splitMarkup(a,splitPayouts)}
     </div>`;
   }).join("");
+  $("advanceAllocationList").querySelectorAll("[data-advance-topup]").forEach(button=>button.onclick=()=>addAdvanceTopUp(button.dataset.advanceTopup,button).catch(showError));
   $("advanceAllocationList").querySelectorAll("[data-split-action]").forEach(button=>button.onclick=()=>splitAction(button).catch(showError));
   $("advanceAllocationList").querySelectorAll("[data-settlement-action]").forEach(button=>button.onclick=()=>settlementAction(button).catch(showError));
   document.querySelectorAll("[data-manager-own-receipt]").forEach(button=>button.onclick=()=>confirmOwnReceipt(button.dataset.managerOwnReceipt,button));
@@ -589,3 +592,30 @@ async function init(){
 init();
 
 
+
+async function addAdvanceTopUp(id,button){
+  if(ownOnly||button.disabled)return;
+  const input=prompt("請輸入這次已補發的預支金額（整數元）");
+  if(input===null)return;
+  const delta=Number(input.trim());
+  if(!/^\d+$/.test(input.trim())||!Number.isSafeInteger(delta)||delta<=0)throw Error("追加金額必須是大於 0 的整數元。");
+  if(!confirm("確認已補發 "+money.format(delta)+"？系統會同步增加這筆使用紀錄的金額。"))return;
+  button.disabled=true;
+  try{
+    const allocationRef=doc(db,"advanceAllocations",id);
+    await runTransaction(db,async tx=>{
+      const alloc=(await tx.get(allocationRef)).data();
+      if(!alloc||alloc.deleted||!alloc.expenseRecordId)throw Error("找不到有效的預支分配。");
+      const expenseRef=doc(db,"expenseRecords",alloc.expenseRecordId);
+      const expense=(await tx.get(expenseRef)).data();
+      if(!expense||expense.deleted||expense.advanceAllocationId!==id)throw Error("找不到連結的使用紀錄。");
+      const prev=num(alloc.advanceTopUpTotal);
+      if(prev!==num(expense.advanceTopUpTotal)||!Number.isSafeInteger(prev+delta))throw Error("追加預支金額不一致。");
+      const fields={advanceTopUpTotal:prev+delta,updatedAt:serverTimestamp(),updatedBy:currentEmail};
+      tx.update(allocationRef,fields);
+      tx.update(expenseRef,fields);
+      tx.set(doc(collection(db,"auditLogs")),{type:"advance-top-up",targetId:id,planId:alloc.planId,actorEmail:currentEmail,amount:delta,createdAt:serverTimestamp()});
+    });
+    location.reload();
+  }finally{button.disabled=false;}
+}
