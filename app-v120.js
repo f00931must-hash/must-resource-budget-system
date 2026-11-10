@@ -80,7 +80,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
         const names=new Map(categories.docs.map(d=>[d.id,d.data().name]));
         return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
           name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
-          amount:r.accountingVoucherAmount??accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
+          amount:accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
           applicant:budgetUserName(r.ownerEmail,r.ownerName),
           accountingId:r.accountingId
         }));
@@ -183,7 +183,7 @@ function planTotal(){ return Number(currentPlan()?.totalBudget||0); }
 function allocatedTotal(){ return state.categories.reduce((s,c)=>s+Number(c.budget||0),0); }
 function isApproved(r){ return r.estimated!==true && (r.reviewStatus==="approved" || r.reviewed===true); }
 function isPending(r){ return r.estimated!==true && !isApproved(r); }
-function accountingAmount(r){ return isApproved(r) && Number.isSafeInteger(r.accountingVoucherAmount) && r.accountingVoucherAmount>=0 ? r.accountingVoucherAmount : Number(r.amount||0); }
+function accountingAmount(r){ return Number.isSafeInteger(r.accountingVoucherAmount) && r.accountingVoucherAmount>=0 ? r.accountingVoucherAmount : Number(r.amount||0); }
 function approvedTotal(records=state.records){ return records.filter(isApproved).reduce((s,r)=>s+accountingAmount(r),0); }
 function pendingTotal(records=state.records){ return records.filter(isPending).reduce((s,r)=>s+accountingAmount(r),0); }
 function estimatedTotal(records=state.records){ return records.filter(r=>r.estimated===true).reduce((s,r)=>s+accountingAmount(r),0); }
