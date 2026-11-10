@@ -408,10 +408,30 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    function accountingVoucherChangeAllowed() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accountingVoucherAmount'])
+        || (!recordLocked()
+          && resource.data.get('deleted', false) == false
+          && linked(resource.data)
+          && (manager() || resource.data.ownerEmail == email())
+          && request.resource.data.estimated == false
+          && request.resource.data.reviewStatus == 'pending'
+          && request.resource.data.get('reviewed', false) == false
+          && request.resource.data.get('locked', false) == false
+          && request.resource.data.archived == true
+          && request.resource.data.amountConfirmed == true
+          && hasVoucher(request.resource.data)
+          && (request.resource.data.accountingVoucherAmount == null
+            || (request.resource.data.accountingVoucherAmount is int
+              && request.resource.data.accountingVoucherAmount >= 0
+              && request.resource.data.accountingVoucherAmount <= 9007199254740991)));
+    }
+
     match /expenseRecords/{recordId} {
       allow read: if enabledUser();
 
       allow create: if enabledUser()
+        && !request.resource.data.keys().hasAny(['accountingVoucherAmount'])
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) == false
         && request.resource.data.get('locked', false) == false
@@ -465,7 +485,7 @@ service cloud.firestore {
 
       // Managers can attach a confirmed voucher on behalf of the record owner.
       // Keep the expense amount, owner and advance allocation intact.
-      allow update: if enabledUser() && manager()
+      allow update: if enabledUser() && accountingVoucherChangeAllowed() && manager()
         && resource.data.get('deleted', false) == false
         && !recordLocked()
         && request.resource.data.estimated == false
@@ -482,7 +502,7 @@ service cloud.firestore {
           'estimated','estimateStage','hanlongAdvance','archived','amountConfirmed',
           'reviewStatus','reviewed','locked','note','ownerName',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
-          'voucherFileSize','voucherFileType','updatedAt','updatedBy'
+          'voucherFileSize','voucherFileType','accountingVoucherAmount','updatedAt','updatedBy'
         ]);
 
       // An owner can edit an unallocated expense while it remains in an estimate stage.
@@ -511,7 +531,7 @@ service cloud.firestore {
 
       // An owner can submit an estimated expense for review with a confirmed voucher.
       // Limit this transition to expense-form fields; allocation and audit fields remain protected.
-      allow update: if enabledUser()
+      allow update: if enabledUser() && accountingVoucherChangeAllowed()
         && resource.data.ownerEmail == email()
         && resource.data.get('deleted', false) == false
         && !recordLocked()
@@ -531,7 +551,7 @@ service cloud.firestore {
           'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
           'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
-          'voucherFileType','updatedAt','updatedBy'
+          'voucherFileType','accountingVoucherAmount','updatedAt','updatedBy'
         ])
         && (!linked(resource.data) || (
           request.resource.data.amount == resource.data.amount
@@ -551,7 +571,7 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hanlongAdvance','updatedAt','updatedBy']);
 
-      allow update: if enabledUser() && linkedRecordProtected() && adjustmentProtected()
+      allow update: if enabledUser() && accountingVoucherChangeAllowed() && linkedRecordProtected() && adjustmentProtected()
         && (manager() || ownRecordServiceUpdate() || (linked(resource.data) && payoutExpenseRefund()) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
         ownRecordServiceUpdate() || (linked(resource.data) && payoutExpenseRefund()) ||
         manager()
