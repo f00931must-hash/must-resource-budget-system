@@ -43,7 +43,6 @@ $("categoryForm").addEventListener("submit", saveCategory);
 ["filterCategory","filterSemester","filterReview","filterIssue","searchInput"].forEach(id=>$(id).addEventListener("input", renderRecords));
 $("filterTeacher")?.addEventListener("change",renderRecords);
 $("recordEstimated").addEventListener("change", updateRecordRequirements);
-$("recordAccountingAmount")?.addEventListener("input",()=>{$("recordAmountConfirm").checked=false;});
 $("recordVoucherFile").addEventListener("change", ()=>{
   if($("recordVoucherFile").files?.[0]) $("recordArchived").checked = true;
   updateRecordRequirements();
@@ -183,7 +182,7 @@ function planTotal(){ return Number(currentPlan()?.totalBudget||0); }
 function allocatedTotal(){ return state.categories.reduce((s,c)=>s+Number(c.budget||0),0); }
 function isApproved(r){ return r.estimated!==true && (r.reviewStatus==="approved" || r.reviewed===true); }
 function isPending(r){ return r.estimated!==true && !isApproved(r); }
-function accountingAmount(r){ return Number.isSafeInteger(r.accountingVoucherAmount) && r.accountingVoucherAmount>=0 ? r.accountingVoucherAmount : Number(r.amount||0); }
+function accountingAmount(r){ return Number(r.amount||0)+Number(r.advanceTopUpTotal||0); }
 function approvedTotal(records=state.records){ return records.filter(isApproved).reduce((s,r)=>s+accountingAmount(r),0); }
 function pendingTotal(records=state.records){ return records.filter(isPending).reduce((s,r)=>s+accountingAmount(r),0); }
 function estimatedTotal(records=state.records){ return records.filter(r=>r.estimated===true).reduce((s,r)=>s+accountingAmount(r),0); }
@@ -501,13 +500,13 @@ async function openEditRecord(id){
   $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||"",r.ownerName||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
   $("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
-  if($("recordAccountingAmount"))$("recordAccountingAmount").value=r.accountingVoucherAmount??"";
   $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
   if(r.voucherUrl||r.folderUrl){
     $("existingVoucherBox").classList.remove("hidden");
     $("existingVoucherBox").innerHTML=`目前附件：<a class="text-link" target="_blank" rel="noopener" href="${escAttr(r.voucherUrl||r.folderUrl)}">${esc(r.voucherFileName||"查看既有核銷單據")}</a><br><small>如重新選擇檔案，儲存後會以新附件取代。</small>`;
   }else { $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; }
   const linked=!!r.advanceAllocationId;
+  if(linked)$("recordAmount").value=accountingAmount(r);
   $("recordAmount").readOnly=linked;
   $("recordAmount").style.backgroundColor=linked?"#e5e7eb":"";
   $("recordAmount").style.color=linked?"#6b7280":"";
@@ -520,9 +519,6 @@ async function openEditRecord(id){
 }
 function updateRecordRequirements(){
   const estimated=$("recordEstimated").checked;
-  const showAccounting=$("recordAmount").readOnly;
-  $("recordAccountingAmountWrap")?.classList.toggle("hidden",!showAccounting);
-  if($("recordAccountingAmount"))$("recordAccountingAmount").disabled=!showAccounting;
   $("manualConfirmWrap").classList.toggle("hidden",estimated);
   $("uploadConfirmWrap").classList.toggle("hidden",estimated);
   $("voucherRequirementHint").textContent=estimated
@@ -567,7 +563,7 @@ async function saveRecord(e){
   const linked=!!existing?.advanceAllocationId;
   if(linked&&categoryId!==existing.categoryId)return toast("已分配經費項目鎖定");
   if(linked&&semester!==existing.semester)return toast("已分配學期鎖定");
-  if(linked&&amount!==Number(existing.amount||0))return toast("已分配金額鎖定，請填寫實際金額申請");
+  if(linked&&amount!==accountingAmount(existing))return toast("已分配金額鎖定，請填寫實際金額申請");
   const proposedRaw=$("recordProposedActualAmount").value.trim();
   const submitting=false;
   if(linked&&!existing.estimated&&estimated)return toast("已確認實際金額，不能改回預估");
@@ -591,9 +587,6 @@ async function saveRecord(e){
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
   }
-  const accountingRaw=linked?($("recordAccountingAmount")?.value.trim()||""):"";
-  const accountingVoucherAmount=accountingRaw===""?null:Number(accountingRaw);
-  if(accountingVoucherAmount!==null&&(!Number.isSafeInteger(accountingVoucherAmount)||accountingVoucherAmount<0))return toast("請輸入有效的會統核銷金額（整數元）");
   let uploaded=null, recordSaved=false, saveStep="附件上傳"; const oldPath=existing?.voucherPath||existing?.voucherStoragePath||githubPathFromUrl(oldUrl);
   try{
     if(file){ $("recordSaveBtn").disabled=true; $("recordSaveBtn").textContent="附件上傳中…"; uploaded=await uploadVoucherFile(file); }
@@ -609,8 +602,8 @@ async function saveRecord(e){
       data.archived=true;data.amountConfirmed=true;data.amountManuallyConfirmed=true;
       data.actualAdjustment={status:"pending",amount:proposedAmount,reason,requestedBy:state.user.email.toLowerCase(),requestedAt:serverTimestamp()};
     }
-    if(linked&&(accountingVoucherAmount!==null||existing?.accountingVoucherAmount!=null))data.accountingVoucherAmount=accountingVoucherAmount;
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
+    if(linked)data.amount=Number(existing.amount||0);
     if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     recordSaved=true;
     saveStep="畫面更新";
@@ -650,7 +643,7 @@ async function approveRecord(id){
   const r=state.records.find(x=>x.id===id); if(!r||r.estimated===true)return;
   if(!(r.voucherUrl||r.folderUrl))return toast("此筆缺少核銷單據，不能核對完成");
   if(r.amountConfirmed!==true&&r.amountManuallyConfirmed!==true)return toast("此筆尚未確認核銷單據與 Key 金額相同");
-  if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money.format(r.accountingVoucherAmount??accountingAmount(r))}\n\n完成後會鎖定。`))return;
+  if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money.format(accountingAmount(r))}\n\n完成後會鎖定。`))return;
   try{
     await updateDoc(doc(db,"expenseRecords",id),{reviewStatus:"approved",reviewed:true,locked:true,reviewedAt:serverTimestamp(),reviewedBy:state.user.email.toLowerCase(),updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()});
     await addDoc(collection(db,"auditLogs"),{type:"expense-review",targetId:id,planId:state.activePlanId,action:"approve",actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()});
