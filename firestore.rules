@@ -337,6 +337,10 @@ service cloud.firestore {
     // Managers manage all allocations. Regular users may read only their own allocation
     // and may only confirm that the allocated amount was received.
     match /advanceAllocations/{allocationId} {
+      allow update: if managerAdvanceTopUp()
+        && getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.advanceAllocationId == allocationId
+        && getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.advanceTopUpTotal == request.resource.data.advanceTopUpTotal;
+
       allow read: if manager()
         || (enabledUser() && resource.data.ownerEmail == email())
         || (advanceOfficer() && ownBatch(get(/databases/$(database)/documents/advanceBatches/$(resource.data.batchId)).data))
@@ -364,7 +368,7 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.advanceAllocationId == allocationId);
       allow delete: if manager();
 
-      allow update: if allocationFixed() && refundReceiptProtected()
+      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceTopUpTotal']) && allocationFixed() && refundReceiptProtected()
         && (request.resource.data.get('deleted',false)!=true || resource.data.get('splitAssigned',0)==0) && (
         (request.resource.data.get('payoutSplit',false)==true && payoutParentChange(allocationId)) ||
         manager()
@@ -409,32 +413,29 @@ service cloud.firestore {
     }
 
     function accountingVoucherChangeAllowed() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accountingVoucherAmount'])
-        || (!recordLocked()
-          && resource.data.get('deleted', false) == false
-          && linked(resource.data)
-          && (manager() || resource.data.ownerEmail == email())
-          && ((request.resource.data.estimated == true
-              && resource.data.get('estimated', false) == true
-              && request.resource.data.reviewStatus == 'estimated')
-            || (request.resource.data.estimated == false
-              && request.resource.data.reviewStatus == 'pending'
-              && request.resource.data.archived == true
-              && request.resource.data.amountConfirmed == true
-              && hasVoucher(request.resource.data)))
-          && request.resource.data.get('reviewed', false) == false
-          && request.resource.data.get('locked', false) == false
-          && (request.resource.data.accountingVoucherAmount == null
-            || (request.resource.data.accountingVoucherAmount is int
-              && request.resource.data.accountingVoucherAmount >= 0
-              && request.resource.data.accountingVoucherAmount <= 9007199254740991)));
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accountingVoucherAmount','advanceTopUpTotal']);
+    }
+
+    function managerAdvanceTopUp() {
+      return enabledUser() && manager()
+        && resource.data.get('deleted', false) == false
+        && request.resource.data.advanceTopUpTotal is int
+        && request.resource.data.advanceTopUpTotal > resource.data.get('advanceTopUpTotal', 0)
+        && request.resource.data.advanceTopUpTotal <= 9007199254740991
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advanceTopUpTotal','updatedBy','updatedAt']);
     }
 
     match /expenseRecords/{recordId} {
+      allow update: if managerAdvanceTopUp() && linked(resource.data)
+        && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.expenseRecordId == recordId
+        && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.advanceTopUpTotal == request.resource.data.advanceTopUpTotal;
+
       allow read: if enabledUser();
 
       allow create: if enabledUser()
-        && !request.resource.data.keys().hasAny(['accountingVoucherAmount'])
+        && !request.resource.data.keys().hasAny(['accountingVoucherAmount','advanceTopUpTotal'])
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) == false
         && request.resource.data.get('locked', false) == false
