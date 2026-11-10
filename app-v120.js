@@ -80,7 +80,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
         const names=new Map(categories.docs.map(d=>[d.id,d.data().name]));
         return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
           name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
-          amount:accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
+          amount:r.accountingVoucherAmount??accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
           applicant:budgetUserName(r.ownerEmail,r.ownerName),
           accountingId:r.accountingId
         }));
@@ -520,7 +520,7 @@ async function openEditRecord(id){
 }
 function updateRecordRequirements(){
   const estimated=$("recordEstimated").checked;
-  const showAccounting=!estimated && $("recordAmount").readOnly;
+  const showAccounting=$("recordAmount").readOnly;
   $("recordAccountingAmountWrap")?.classList.toggle("hidden",!showAccounting);
   if($("recordAccountingAmount"))$("recordAccountingAmount").disabled=!showAccounting;
   $("manualConfirmWrap").classList.toggle("hidden",estimated);
@@ -591,7 +591,7 @@ async function saveRecord(e){
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
   }
-  const accountingRaw=linked&&!estimated?($("recordAccountingAmount")?.value.trim()||""):"";
+  const accountingRaw=linked?($("recordAccountingAmount")?.value.trim()||""):"";
   const accountingVoucherAmount=accountingRaw===""?null:Number(accountingRaw);
   if(accountingVoucherAmount!==null&&(!Number.isSafeInteger(accountingVoucherAmount)||accountingVoucherAmount<0))return toast("請輸入有效的會統核銷金額（整數元）");
   let uploaded=null, recordSaved=false, saveStep="附件上傳"; const oldPath=existing?.voucherPath||existing?.voucherStoragePath||githubPathFromUrl(oldUrl);
@@ -609,7 +609,7 @@ async function saveRecord(e){
       data.archived=true;data.amountConfirmed=true;data.amountManuallyConfirmed=true;
       data.actualAdjustment={status:"pending",amount:proposedAmount,reason,requestedBy:state.user.email.toLowerCase(),requestedAt:serverTimestamp()};
     }
-    if(linked&&!estimated&&(accountingVoucherAmount!==null||existing?.accountingVoucherAmount!=null))data.accountingVoucherAmount=accountingVoucherAmount;
+    if(linked&&(accountingVoucherAmount!==null||existing?.accountingVoucherAmount!=null))data.accountingVoucherAmount=accountingVoucherAmount;
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     recordSaved=true;
