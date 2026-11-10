@@ -43,6 +43,7 @@ $("categoryForm").addEventListener("submit", saveCategory);
 ["filterCategory","filterSemester","filterReview","filterIssue","searchInput"].forEach(id=>$(id).addEventListener("input", renderRecords));
 $("filterTeacher")?.addEventListener("change",renderRecords);
 $("recordEstimated").addEventListener("change", updateRecordRequirements);
+$("recordAccountingAmount")?.addEventListener("input",()=>{$("recordAmountConfirm").checked=false;});
 $("recordVoucherFile").addEventListener("change", ()=>{
   if($("recordVoucherFile").files?.[0]) $("recordArchived").checked = true;
   updateRecordRequirements();
@@ -79,7 +80,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
         const names=new Map(categories.docs.map(d=>[d.id,d.data().name]));
         return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
           name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
-          amount:r.amount, stage:recordStageText(r), semester:r.semester, note:r.note,
+          amount:accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
           applicant:budgetUserName(r.ownerEmail,r.ownerName),
           accountingId:r.accountingId
         }));
@@ -182,10 +183,11 @@ function planTotal(){ return Number(currentPlan()?.totalBudget||0); }
 function allocatedTotal(){ return state.categories.reduce((s,c)=>s+Number(c.budget||0),0); }
 function isApproved(r){ return r.estimated!==true && (r.reviewStatus==="approved" || r.reviewed===true); }
 function isPending(r){ return r.estimated!==true && !isApproved(r); }
-function approvedTotal(records=state.records){ return records.filter(isApproved).reduce((s,r)=>s+Number(r.amount||0),0); }
-function pendingTotal(records=state.records){ return records.filter(isPending).reduce((s,r)=>s+Number(r.amount||0),0); }
-function estimatedTotal(records=state.records){ return records.filter(r=>r.estimated===true).reduce((s,r)=>s+Number(r.amount||0),0); }
-function reservedTotal(records=state.records){ return records.reduce((s,r)=>s+Number(r.amount||0),0); }
+function accountingAmount(r){ return isApproved(r) && Number.isSafeInteger(r.accountingVoucherAmount) && r.accountingVoucherAmount>=0 ? r.accountingVoucherAmount : Number(r.amount||0); }
+function approvedTotal(records=state.records){ return records.filter(isApproved).reduce((s,r)=>s+accountingAmount(r),0); }
+function pendingTotal(records=state.records){ return records.filter(isPending).reduce((s,r)=>s+accountingAmount(r),0); }
+function estimatedTotal(records=state.records){ return records.filter(r=>r.estimated===true).reduce((s,r)=>s+accountingAmount(r),0); }
+function reservedTotal(records=state.records){ return records.reduce((s,r)=>s+accountingAmount(r),0); }
 function tsMillis(v){
   if(!v) return 0;
   if(typeof v.toMillis==="function") return v.toMillis();
@@ -411,7 +413,7 @@ function renderRecords(){
     if(isManager() && approved) actions+=`<button class="link-btn unlock" data-unlock-record="${r.id}">解鎖</button>`;
     return `<article class="record-card ${approved?'locked':''}">
       <div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(r.ownerName||r.ownerEmail||"")}</small></div>
-      <div><strong>${money.format(r.amount||0)}</strong><small>學期：${esc(r.semester||"未填")}</small></div>
+      <div><strong>${money.format(accountingAmount(r))}</strong><small>學期：${esc(r.semester||"未填")}</small></div>
       <div>${statusBadge}${issues}</div>
       <div><small>核銷單據</small><div>${evidenceUrl?`<a class="text-link" target="_blank" rel="noopener" href="${escAttr(evidenceUrl)}">${esc(r.voucherFileName||"查看附件")}</a>`:"—"}</div></div>
       <div class="record-actions">${actions}</div>
@@ -434,7 +436,7 @@ function renderCategoryAdmin(){
       <div><small>編列額度</small><strong>${money.format(c.budget||0)}</strong></div>
       <div><small>已核銷</small><strong>${money.format(approvedTotal(recs))}</strong></div>
       <div><small>待核對＋預估</small><strong>${money.format(pendingTotal(recs)+estimatedTotal(recs))}</strong></div>
-      <div><small>剩餘金額</small><strong style="color:${Number(c.budget||0)-recs.reduce((s,r)=>s+Number(r.amount||0),0)<0?'#b42318':'inherit'}">${money.format(Number(c.budget||0)-recs.reduce((s,r)=>s+Number(r.amount||0),0))}</strong></div>
+      <div><small>剩餘金額</small><strong style="color:${Number(c.budget||0)-recs.reduce((s,r)=>s+accountingAmount(r),0)<0?'#b42318':'inherit'}">${money.format(Number(c.budget||0)-recs.reduce((s,r)=>s+accountingAmount(r),0))}</strong></div>
       <div><button class="link-btn" data-edit-category="${c.id}">調整</button> <button class="link-btn danger" data-delete-category="${c.id}">刪除</button></div>
     </div>`;
   }).join("");
@@ -499,6 +501,7 @@ async function openEditRecord(id){
   $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||"",r.ownerName||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
   $("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
+  if($("recordAccountingAmount"))$("recordAccountingAmount").value=r.accountingVoucherAmount??"";
   $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
   if(r.voucherUrl||r.folderUrl){
     $("existingVoucherBox").classList.remove("hidden");
@@ -517,6 +520,9 @@ async function openEditRecord(id){
 }
 function updateRecordRequirements(){
   const estimated=$("recordEstimated").checked;
+  const showAccounting=!estimated && $("recordAmount").readOnly;
+  $("recordAccountingAmountWrap")?.classList.toggle("hidden",!showAccounting);
+  if($("recordAccountingAmount"))$("recordAccountingAmount").disabled=!showAccounting;
   $("manualConfirmWrap").classList.toggle("hidden",estimated);
   $("uploadConfirmWrap").classList.toggle("hidden",estimated);
   $("voucherRequirementHint").textContent=estimated
@@ -572,7 +578,7 @@ async function saveRecord(e){
   const recordOwner=linked?{email:existing.ownerEmail,name:existing.ownerName}:selectedRecordOwner(existing);
   const cat=state.categories.find(c=>c.id===categoryId); if(!cat)return toast("請選擇經費項目");
   if(!/^\d{3}-[12]$/.test(semester))return toast("學期請輸入例如 114-2、115-1");
-  const other=state.records.filter(r=>r.categoryId===categoryId&&r.id!==id).reduce((s,r)=>s+Number(r.amount||0),0);
+  const other=state.records.filter(r=>r.categoryId===categoryId&&r.id!==id).reduce((s,r)=>s+accountingAmount(r),0);
   // 剩餘額度可為負數，仍允許登錄支出。
   const file=$("recordVoucherFile").files?.[0]||null, oldUrl=existing?.voucherUrl||existing?.folderUrl||"";
   if(file&&file.size>20*1024*1024)return toast("核銷單據檔案不可超過 20 MB",5000);
@@ -585,6 +591,9 @@ async function saveRecord(e){
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
   }
+  const accountingRaw=linked&&!estimated?($("recordAccountingAmount")?.value.trim()||""):"";
+  const accountingVoucherAmount=accountingRaw===""?null:Number(accountingRaw);
+  if(accountingVoucherAmount!==null&&(!Number.isSafeInteger(accountingVoucherAmount)||accountingVoucherAmount<0))return toast("請輸入有效的會統核銷金額（整數元）");
   let uploaded=null, recordSaved=false, saveStep="附件上傳"; const oldPath=existing?.voucherPath||existing?.voucherStoragePath||githubPathFromUrl(oldUrl);
   try{
     if(file){ $("recordSaveBtn").disabled=true; $("recordSaveBtn").textContent="附件上傳中…"; uploaded=await uploadVoucherFile(file); }
@@ -600,6 +609,7 @@ async function saveRecord(e){
       data.archived=true;data.amountConfirmed=true;data.amountManuallyConfirmed=true;
       data.actualAdjustment={status:"pending",amount:proposedAmount,reason,requestedBy:state.user.email.toLowerCase(),requestedAt:serverTimestamp()};
     }
+    if(linked&&!estimated&&(accountingVoucherAmount!==null||existing?.accountingVoucherAmount!=null))data.accountingVoucherAmount=accountingVoucherAmount;
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     recordSaved=true;
@@ -626,7 +636,7 @@ async function deleteRecord(id){
   const r=state.records.find(x=>x.id===id); if(!r)return;
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager()&&r.ownerEmail!==state.user.email.toLowerCase())return toast("只能刪除自己建立的使用紀錄");
-  if(!confirm(`確定刪除「${r.purpose||"此筆"}」？\n金額：${money.format(r.amount||0)}\n\n刪除後無法復原。`))return;
+  if(!confirm(`確定刪除「${r.purpose||"此筆"}」？\n金額：${money.format(accountingAmount(r))}\n\n刪除後無法復原。`))return;
   try{
     await deleteDoc(doc(db,"expenseRecords",id));
     const p=r.voucherPath||r.voucherStoragePath||githubPathFromUrl(r.voucherUrl||r.folderUrl||"");
@@ -640,7 +650,7 @@ async function approveRecord(id){
   const r=state.records.find(x=>x.id===id); if(!r||r.estimated===true)return;
   if(!(r.voucherUrl||r.folderUrl))return toast("此筆缺少核銷單據，不能核對完成");
   if(r.amountConfirmed!==true&&r.amountManuallyConfirmed!==true)return toast("此筆尚未確認核銷單據與 Key 金額相同");
-  if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money.format(r.amount||0)}\n\n完成後會鎖定。`))return;
+  if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money.format(r.accountingVoucherAmount??accountingAmount(r))}\n\n完成後會鎖定。`))return;
   try{
     await updateDoc(doc(db,"expenseRecords",id),{reviewStatus:"approved",reviewed:true,locked:true,reviewedAt:serverTimestamp(),reviewedBy:state.user.email.toLowerCase(),updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()});
     await addDoc(collection(db,"auditLogs"),{type:"expense-review",targetId:id,planId:state.activePlanId,action:"approve",actorEmail:state.user.email.toLowerCase(),createdAt:serverTimestamp()});
@@ -673,7 +683,7 @@ function recordStageText(r){
   return "待核對";
 }
 function amountByStage(rows,stage){
-  return rows.filter(r=>recordStageText(r)===stage||(stage==="預估"&&recordStageText(r)==="核銷中")).reduce((s,r)=>s+Number(r.amount||0),0);
+  return rows.filter(r=>recordStageText(r)===stage||(stage==="預估"&&recordStageText(r)==="核銷中")).reduce((s,r)=>s+accountingAmount(r),0);
 }
 function budgetExcelStyleCell(cell,{fill,fontColor="FF243B53",bold=false,size=11,align="left",border=true}={}){
   cell.font={name:"Microsoft JhengHei",color:{argb:fontColor},bold,size};
@@ -744,7 +754,7 @@ async function downloadBudgetExcel(){
     const pending=amountByStage(rows,"待核對");
     const estimated=amountByStage(rows,"預估");
     const purchasing=amountByStage(rows,"請購中");
-    const reserved=rows.reduce((s,r)=>s+Number(r.amount||0),0);
+    const reserved=rows.reduce((s,r)=>s+accountingAmount(r),0);
     const remain=total-reserved;
     const wb=new ExcelJS.Workbook();
     wb.creator="明新科技大學資源教室";
@@ -796,7 +806,7 @@ async function downloadBudgetExcel(){
       const cr=rows.filter(r=>r.categoryId===cat.id);
       const budget=Number(cat.budget||0);
       const e=amountByStage(cr,"預估"),p=amountByStage(cr,"請購中"),w=amountByStage(cr,"待核對"),a=amountByStage(cr,"已核銷");
-      const used=cr.reduce((s,r)=>s+Number(r.amount||0),0),left=budget-used,rate=budget>0?used/budget:0;
+      const used=cr.reduce((s,r)=>s+accountingAmount(r),0),left=budget-used,rate=budget>0?used/budget:0;
       const row=ws.addRow(["",budget,e,p,w,a,used,left,rate]);
       categoryStartRows.set(cat.id,row.number);
       budgetExcelLink(row.getCell(1),`${cat.name||"未命名科目"}${cat.active===false?"（停用）":""}`,"#'使用紀錄明細'!A1");
@@ -849,7 +859,7 @@ async function downloadBudgetExcel(){
       const cr=rows.filter(r=>r.categoryId===cat.id)
         .sort((a,b)=>String(b.semester||"").localeCompare(String(a.semester||""),undefined,{numeric:true})||tsMillis(b.updatedAt||b.createdAt)-tsMillis(a.updatedAt||a.createdAt));
       if(!cr.length)return;
-      const budget=Number(cat.budget||0),used=cr.reduce((s,r)=>s+Number(r.amount||0),0);
+      const budget=Number(cat.budget||0),used=cr.reduce((s,r)=>s+accountingAmount(r),0);
       detail.mergeCells(`A${currentRow}:L${currentRow}`);
       detail.getCell(`A${currentRow}`).value=`${cat.name||"未命名科目"}｜編列 ${budget.toLocaleString("zh-TW")} 元｜目前占用 ${used.toLocaleString("zh-TW")} 元｜剩餘 ${(budget-used).toLocaleString("zh-TW")} 元`;
       budgetExcelStyleCell(detail.getCell(`A${currentRow}`),{fill:"FF4E79A7",fontColor:"FFFFFFFF",bold:true,size:12});
@@ -870,7 +880,7 @@ async function downloadBudgetExcel(){
           r.semester||"",
           r.purpose||"",
           owner,
-          Number(r.amount||0),
+          accountingAmount(r),
           recordStageText(r),
           voucher,
           confirmed,
@@ -907,7 +917,7 @@ async function downloadBudgetExcel(){
       currentRow++;
       other.forEach(r=>{
         const row=detail.getRow(currentRow++);
-        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",r.ownerName||budgetUserName(r.ownerEmail,""),Number(r.amount||0),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,"")];
+        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",r.ownerName||budgetUserName(r.ownerEmail,""),accountingAmount(r),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,"")];
         row.eachCell((cell,col)=>budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"}));
         budgetExcelMoney(row.getCell(5));
         if(row.getCell(11).value instanceof Date)row.getCell(11).numFmt="yyyy-mm-dd hh:mm";
@@ -971,7 +981,7 @@ async function saveCategory(e){
   const id=$("categoryId").value; if(!id&&!isPlanActive())return toast("此計畫已停用，無法新增經費項目");
   const old=id?state.categories.find(x=>x.id===id):null, budget=Number($("categoryBudget").value||0), other=state.categories.filter(c=>c.id!==id).reduce((s,c)=>s+Number(c.budget||0),0);
   if(other+budget>planTotal())return toast("編列總額不可超過計畫總額",5000);
-  const used=id?state.records.filter(r=>r.categoryId===id).reduce((s,r)=>s+Number(r.amount||0),0):0;
+  const used=id?state.records.filter(r=>r.categoryId===id).reduce((s,r)=>s+accountingAmount(r),0):0;
   if(!Number.isSafeInteger(budget)||budget<0)return toast("編列額度須為非負整數",5000);
   const data={planId:state.activePlanId,name:$("categoryName").value.trim(),budget,order:Number($("categoryOrder").value||0),active:$("categoryActive").checked,updatedAt:serverTimestamp(),updatedBy:state.user.email.toLowerCase()};
   try{
@@ -1027,7 +1037,7 @@ $('budgetTransferBtn').onclick=()=>{
   $('adjustmentBody').innerHTML=`<form id="transferBudgetForm"><label>撥出項目（編列減少）<select id="transferFrom" required>${opts}</select></label><label>撥入項目（編列增加）<select id="transferTo" required>${opts}</select></label><label>轉移金額<input id="transferAmount" type="number" min="1" step="1" required></label><label>備註<textarea id="transferReason" maxlength="300"></textarea></label><p class="hint">例如：活動費撥出 7,000 元給會議費。計畫總編列不變，原使用紀錄及預支分配不變。</p><div id="transferPreview" class="hint"></div><button class="primary-btn" id="transferSave">確認轉移</button></form>`;
   const preview=()=>{
     const from=state.categories.find(c=>c.id===$('transferFrom').value),to=state.categories.find(c=>c.id===$('transferTo').value),amount=Number($('transferAmount').value);
-    const remain=c=>Number(c.budget||0)-state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+Number(r.amount||0),0);
+    const remain=c=>Number(c.budget||0)-state.records.filter(r=>r.categoryId===c.id).reduce((s,r)=>s+accountingAmount(r),0);
     $('transferPreview').textContent=from&&to&&amount>0?`${from.name}：編列 ${money.format(Number(from.budget||0)-amount)}，剩餘 ${money.format(remain(from)-amount)}；${to.name}：編列 ${money.format(Number(to.budget||0)+amount)}，剩餘 ${money.format(remain(to)+amount)}`:'';
   };
   $('transferBudgetForm').oninput=preview;
