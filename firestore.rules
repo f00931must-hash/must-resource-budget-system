@@ -430,6 +430,28 @@ service cloud.firestore {
           )
         );
 
+      // Managers can attach a confirmed voucher on behalf of the record owner.
+      // Keep the expense amount, owner and advance allocation intact.
+      allow update: if enabledUser() && manager()
+        && resource.data.get('deleted', false) == false
+        && !recordLocked()
+        && request.resource.data.estimated == false
+        && request.resource.data.get('estimateStage', '') == ''
+        && request.resource.data.reviewStatus == 'pending'
+        && request.resource.data.get('reviewed', false) == false
+        && request.resource.data.get('locked', false) == false
+        && request.resource.data.archived == true
+        && request.resource.data.amountConfirmed == true
+        && request.resource.data.get('voucherUrl', '') != ''
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'estimated','estimateStage','hanlongAdvance','archived','amountConfirmed',
+          'reviewStatus','reviewed','locked','note','ownerName',
+          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
+          'voucherFileSize','voucherFileType','updatedAt','updatedBy'
+        ]);
+
       // An owner can edit an unallocated expense while it remains in an estimate stage.
       // A stale form cannot overwrite an amount after the record is allocated.
       allow update: if enabledUser()
