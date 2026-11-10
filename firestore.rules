@@ -414,13 +414,16 @@ service cloud.firestore {
           && resource.data.get('deleted', false) == false
           && linked(resource.data)
           && (manager() || resource.data.ownerEmail == email())
-          && request.resource.data.estimated == false
-          && request.resource.data.reviewStatus == 'pending'
+          && ((request.resource.data.estimated == true
+              && resource.data.get('estimated', false) == true
+              && request.resource.data.reviewStatus == 'estimated')
+            || (request.resource.data.estimated == false
+              && request.resource.data.reviewStatus == 'pending'
+              && request.resource.data.archived == true
+              && request.resource.data.amountConfirmed == true
+              && hasVoucher(request.resource.data)))
           && request.resource.data.get('reviewed', false) == false
           && request.resource.data.get('locked', false) == false
-          && request.resource.data.archived == true
-          && request.resource.data.amountConfirmed == true
-          && hasVoucher(request.resource.data)
           && (request.resource.data.accountingVoucherAmount == null
             || (request.resource.data.accountingVoucherAmount is int
               && request.resource.data.accountingVoucherAmount >= 0
@@ -482,6 +485,28 @@ service cloud.firestore {
             ])
           )
         );
+
+      // Save an accounting comparison amount before the voucher is ready.
+      allow update: if enabledUser()
+        && (manager() || resource.data.ownerEmail == email())
+        && resource.data.get('deleted', false) == false
+        && !recordLocked()
+        && linked(resource.data)
+        && resource.data.get('estimated', false) == true
+        && request.resource.data.estimated == true
+        && request.resource.data.reviewStatus == 'estimated'
+        && request.resource.data.get('estimateStage', 'estimated') in ['estimated', 'purchasing', 'reimbursing']
+        && request.resource.data.get('reviewed', false) == false
+        && request.resource.data.get('locked', false) == false
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && accountingVoucherChangeAllowed()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'purpose','note','ownerName','estimateStage','hanlongAdvance','archived',
+          'amountConfirmed','reviewStatus','reviewed','locked','accountingVoucherAmount',
+          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
+          'voucherFileSize','voucherFileType','updatedAt','updatedBy'
+        ]);
 
       // Managers can attach a confirmed voucher on behalf of the record owner.
       // Keep the expense amount, owner and advance allocation intact.
