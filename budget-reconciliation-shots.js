@@ -1,4 +1,4 @@
-const excluded=/助理人員服務費|輔導人員費|課業輔導鐘點費/;
+const excluded=category=>norm(category)==="輔導人員費";
 const norm=v=>String(v??"").normalize("NFKC").trim();
 const termPattern=/(?:\d{3})\s*(?:[-－]\s*[12](?!\d)|學年度第\s*[12一二]\s*學期)/;
 const termKey=v=>norm(v).match(termPattern)?.[0].replace(/學年度第\s*([12一二])\s*學期/,"-$1").replace(/一/g,"1").replace(/二/g,"2").replace(/\s/g,"")||"";
@@ -60,7 +60,7 @@ const num=v=>{const raw=norm(v),s=raw.replace(/,/g,"");return /^-?(?:\d+|\d{1,3}
 const sum=(rs,f)=>rs.reduce((n,r)=>n+Math.round(f(r)*100),0)/100;
 const unique=a=>[...new Set(a.filter(Boolean))];
 const refs=s=>unique(norm(s).toUpperCase().match(/(?<![A-Z0-9])(?:G\d{11}|1\d{11})(?![A-Z0-9])/g)||[]);
-const sourceExcluded=r=>/(?:^|\s)[\w-]+-001\b/.test(r.code)||/助理人員服務費|課業輔導|課輔鐘點|輔導人員.*薪資|薪資.*輔導人員/.test(r.name);
+const sourceExcluded=r=>/輔導人員費/.test(norm(r.code))||/輔導人員費|輔導人員.{0,12}(?:薪資|薪水|薪酬)|(?:薪資|薪水|薪酬).{0,12}輔導人員/.test(norm(r.name));
 export function calculateShots(rows,records){
   const map=new Map();
   let duplicates=0;
@@ -77,7 +77,12 @@ export function calculateShots(rows,records){
     }
     map.set(id,row);
   }
-  const active=[...map.values()].filter(r=>!/^(?:已)?作廢$/.test(r.status)&&!sourceExcluded(r));
+  const validRows=[...map.values()].filter(r=>!/^(?:已)?作廢$/.test(r.status));
+  const personnelPurchases=validRows.filter(r=>r.kind==="purchase"&&sourceExcluded(r));
+  const personnelPurchaseIds=new Set(personnelPurchases.map(r=>r.id));
+  const personnelClaimIds=new Set(personnelPurchases.flatMap(r=>r.related));
+  const otherPurchaseClaimIds=new Set(validRows.filter(r=>r.kind==="purchase"&&!personnelPurchaseIds.has(r.id)).flatMap(r=>r.related));
+  const active=validRows.filter(r=>!sourceExcluded(r)&&!(r.kind==="claim"&&(!otherPurchaseClaimIds.has(r.id)&&r.related.every(id=>personnelPurchaseIds.has(id))&&(personnelClaimIds.has(r.id)||r.related.length>0))));
   const kept=new Map(active.map(r=>[r.id,r])), links=new Map(active.map(r=>[r.id,new Set()]));
   const missing=new Set();
   for(const r of active)for(const id of r.related){
@@ -89,7 +94,7 @@ export function calculateShots(rows,records){
   const claims=active.filter(r=>r.kind==="claim"), pending=active.filter(r=>r.kind==="purchase"&&!transferred(r));
   const pendingAmount=sum(pending,r=>r.amount), claimAmount=sum(claims,r=>r.amount);
   const accounting=sum([pendingAmount,claimAmount],x=>x);
-  const budgetRecords=records.filter(r=>!excluded.test(r.category)&&["已核銷","預估","請購中","核銷中"].includes(r.stage));
+  const budgetRecords=records.filter(r=>!excluded(r.category)&&["已核銷","預估","請購中","核銷中"].includes(r.stage));
   const budget=sum(budgetRecords,r=>Number(r.amount||0));
   const budgetClaimed=sum(budgetRecords.filter(r=>r.stage==="已核銷"),r=>Number(r.amount||0));
   // The purchase is a reference for each claim, not the unit of reconciliation.
@@ -105,7 +110,7 @@ export function calculateShots(rows,records){
       group:[p],matchRows:[p],sharedParentIds:[],amount:transferred(p)?null:p.amount
     }))
   ];
-  const recordsForMatch=records.filter(r=>!excluded.test(r.category));
+  const recordsForMatch=records.filter(r=>!excluded(r.category));
   const candidates=groups.map(g=>recordsForMatch.map((r,i)=>{
     const id=refs([r.accountingId,r.note,r.name].join(" "));
     if(g.matchRows.some(s=>id.includes(s.id)))return {i,rank:100};
@@ -210,7 +215,7 @@ function book(result){
   const wb=new window.ExcelJS.Workbook();
   const totals=wb.addWorksheet("對帳摘要"), ws=wb.addWorksheet("差異明細",{views:[{state:"frozen",ySplit:1}]});
   totals.columns=[{width:42},{width:58}];
-  totals.addRows([["項目","結果"],["會統：未轉入核銷的請購",result.pendingAmount],["會統：核銷",result.claimAmount],["會統合計（已去重）",result.accounting],["資教：已核銷",result.budgetClaimed],["資教：已預估（含請購中、核銷中）",result.estimated],["資教合計",result.budget],["差額（資教－會統）",result.delta],["未找到的關聯單號",result.missing.join("、")]]);
+  totals.addRows([["項目","結果"],["對帳口徑","兩邊均扣除輔導人員費"],["會統：未轉入核銷的請購",result.pendingAmount],["會統：核銷",result.claimAmount],["會統合計（已去重）",result.accounting],["資教：已核銷",result.budgetClaimed],["資教：已預估（含請購中、核銷中）",result.estimated],["資教合計",result.budget],["差額（資教－會統）",result.delta],["未找到的關聯單號",result.missing.join("、")]]);
   ws.columns=[23,22,37,15,17,23,24,43,17,16].map(width=>({width}));
   ws.addRow(["結果","申請人","資教案名","資教狀態","資教金額","請購單號","核銷單號","會統案名","會統計入金額","差額"]);
   for(const {type,r,group,amount,difference} of result.details)if(type!=="相符"){
