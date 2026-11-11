@@ -60,7 +60,7 @@ const num=v=>{const raw=norm(v),s=raw.replace(/,/g,"");return /^-?(?:\d+|\d{1,3}
 const sum=(rs,f)=>rs.reduce((n,r)=>n+Math.round(f(r)*100),0)/100;
 const unique=a=>[...new Set(a.filter(Boolean))];
 const refs=s=>unique(norm(s).toUpperCase().match(/(?<![A-Z0-9])(?:G\d{11}|1\d{11})(?![A-Z0-9])/g)||[]);
-const sourceExcluded=r=>/輔導人員費/.test(norm(r.code))||/輔導人員費|輔導人員.{0,12}(?:薪資|薪水|薪酬)|(?:薪資|薪水|薪酬).{0,12}輔導人員/.test(norm(r.name));
+const sourceExcluded=r=>/輔導人員費/.test(norm(r.code))||/輔導人員費|輔導人員.{0,12}(?:薪資|薪水|薪酬|年終(?:工作)?獎金)|(?:薪資|薪水|薪酬|年終(?:工作)?獎金).{0,12}輔導人員/.test(norm(r.name));
 export function calculateShots(rows,records){
   const map=new Map();
   let duplicates=0;
