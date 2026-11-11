@@ -155,7 +155,14 @@ export function calculateShots(rows,records){
     details.push({type,r,group:g.group,amount:g.amount,difference});
   });
   recordsForMatch.forEach((r,i)=>{if(!used.has(i))details.push({type:candidates.some(c=>c.some(x=>x.i===i))?"待人工確認":"資教有，本次會統未配對",r,group:[],amount:null,difference:null});});
-  return {accounting,budget,delta:sum([budget,-accounting],x=>x),claimAmount,pendingAmount,budgetClaimed,estimated:sum([budget,-budgetClaimed],x=>x),missing:[...missing],duplicates,details,purchases:[...map.values()].filter(r=>r.kind==="purchase").length,claims:[...map.values()].filter(r=>r.kind==="claim").length};
+  const uncounted=[...map.values()].filter(row=>!kept.has(row.id)).map(row=>({
+    type:/^(?:已)?作廢$/.test(row.status)?"會統作廢（不計入）":"會統輔導人員費（不計入）",
+    group:[row],amount:null,difference:null
+  }));
+  const fullDetails=[...details,...uncounted,...records.filter(r=>excluded(r.category)).map(r=>({
+    type:"資教輔導人員費（不計入）",r,group:[],amount:null,difference:null
+  }))];
+  return {accounting,budget,delta:sum([budget,-accounting],x=>x),claimAmount,pendingAmount,budgetClaimed,estimated:sum([budget,-budgetClaimed],x=>x),missing:[...missing],duplicates,details,fullDetails,sourceRows:[...map.values()],purchases:[...map.values()].filter(r=>r.kind==="purchase").length,claims:[...map.values()].filter(r=>r.kind==="claim").length};
 }
 export function readCopiedTable(text,kind,page){
   const lines=String(text).replace(/\r\n?/g,"\n").split("\n"), rows=[];
@@ -216,16 +223,25 @@ function book(result){
   const totals=wb.addWorksheet("對帳摘要"), ws=wb.addWorksheet("差異明細",{views:[{state:"frozen",ySplit:1}]});
   totals.columns=[{width:42},{width:58}];
   totals.addRows([["項目","結果"],["對帳口徑","兩邊均扣除輔導人員費"],["會統：未轉入核銷的請購",result.pendingAmount],["會統：核銷",result.claimAmount],["會統合計（已去重）",result.accounting],["資教：已核銷",result.budgetClaimed],["資教：已預估（含請購中、核銷中）",result.estimated],["資教合計",result.budget],["差額（資教－會統）",result.delta],["未找到的關聯單號",result.missing.join("、")]]);
-  ws.columns=[23,22,37,15,17,23,24,43,17,16].map(width=>({width}));
-  ws.addRow(["結果","申請人","資教案名","資教狀態","資教金額","請購單號","核銷單號","會統案名","會統計入金額","差額"]);
-  for(const {type,r,group,amount,difference} of result.details)if(type!=="相符"){
-    const row=ws.addRow([type,unique(group.map(g=>g.applicant)).join("／")||r?.applicant,r?.name,r?.stage,r?.amount,
-      group.filter(g=>g.kind==="purchase").map(g=>g.id).join("、"),group.filter(g=>g.kind==="claim").map(g=>g.id).join("、"),unique(group.map(g=>g.name)).join("／"),amount,difference]);
-    if(typeof difference==="number"&&difference!==0)row.getCell(10).font={color:{argb:"FFC00000"},bold:true};
+  const full=wb.addWorksheet("完整對帳明細",{views:[{state:"frozen",ySplit:1}]});
+  const sourceRows=result.sourceRows||[];
+  const sourceFor=(group)=>{
+    const related=sourceRows.filter(p=>p.kind==="purchase"&&group.some(g=>g.kind==="claim"&&(g.related.includes(p.id)||p.related.includes(g.id))));
+    return unique([...group,...related].map(g=>g.code)).join("／")||(group.length?"未提供":"");
+  };
+  for(const [sheet,items,all] of [[ws,result.details.filter(d=>d.type!=="相符"),false],[full,result.fullDetails,true]]){
+    sheet.columns=[26,22,37,15,17,23,24,43,17,16,50,...(all?[48,24]:[])].map(width=>({width}));
+    sheet.addRow(["結果","申請人","資教案名","資教狀態","資教金額","請購單號","核銷單號","會統案名","會統計入金額","差額","會統預算來源",...(all?["會統原始金額（按單號）","資教經費項目"]:[])]);
+    for(const {type,r,group,amount,difference} of items){
+      const row=sheet.addRow([type,unique(group.map(g=>g.applicant)).join("／")||r?.applicant,r?.name,r?.stage,r?.amount,
+        group.filter(g=>g.kind==="purchase").map(g=>g.id).join("、"),group.filter(g=>g.kind==="claim").map(g=>g.id).join("、"),unique(group.map(g=>g.name)).join("／"),amount,difference,sourceFor(group),
+        ...(all?[group.map(g=>g.id+"："+g.amount.toLocaleString("zh-TW")).join("／"),r?.category]:[])]);
+      if(typeof difference==="number"&&difference!==0)row.getCell(10).font={color:{argb:"FFC00000"},bold:true};
+    }
+    sheet.autoFilter={from:"A1",to:all?"M1":"K1"};
+    for(const col of [5,9,10])sheet.getColumn(col).numFmt='#,##0.##;[Red]-#,##0.##;0';
   }
-  ws.autoFilter={from:"A1",to:"J1"};
-  for(const col of [5,9,10])ws.getColumn(col).numFmt='#,##0.##;[Red]-#,##0.##;0';
-  for(const s of [totals,ws]){s.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};s.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF513681"}};}
+  for(const sheet of [totals,ws,full]){sheet.getRow(1).font={bold:true,color:{argb:"FFFFFFFF"}};sheet.getRow(1).fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF513681"}};}
   return wb.xlsx.writeBuffer();
 }
 export function openShots({plan,draftKey,valid,authorized,getRecords,saveSummary,download}){
