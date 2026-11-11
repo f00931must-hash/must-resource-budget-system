@@ -66,7 +66,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
   button.disabled=true;
   try{
     if(!await authorized())return toast("無法確認經費管理員權限，請確認連線或重新登入",5000);
-    const {openShots}=await import(new URL("./budget-reconciliation-shots.js?v=15",document.baseURI).href);
+    const {openShots}=await import(new URL("./budget-reconciliation-shots.js?v=16",document.baseURI).href);
     if(!valid())return;
     openShots({
       plan:currentPlan()?.name||"目前計畫", draftKey:"budget-reconciliation-draft:v1:"+encodeURIComponent(uid)+":"+encodeURIComponent(planId), valid, authorized,
@@ -225,7 +225,7 @@ async function refreshBudgetReconciliationSummary(){
     const latest=snap.docs.map(d=>d.data()).filter(r=>r.createdAt?.toDate&&[r.accounting,r.budget,r.delta].every(Number.isFinite))
       .sort((a,b)=>b.createdAt.toMillis()-a.createdAt.toMillis()||(b.createdAt.nanoseconds||0)-(a.createdAt.nanoseconds||0))[0];
     values.hidden=!latest;
-    status.textContent=latest?"顯示對帳當下的金額；兩邊沿用排除三類費用。":"這個計畫還沒有已確認的截圖對帳。";
+    status.textContent=latest?"顯示對帳當下的金額；新對帳會扣除輔導人員費；請重新計算以更新舊結果。":"這個計畫還沒有已確認的截圖對帳。";
     if(!latest)return;
     const fmt=new Intl.NumberFormat("zh-TW",{maximumFractionDigits:2});
     $("budgetLatestDate").textContent=new Intl.DateTimeFormat("zh-TW",{dateStyle:"short",timeStyle:"short",timeZone:"Asia/Taipei"}).format(latest.createdAt.toDate());
