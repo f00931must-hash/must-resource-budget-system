@@ -427,7 +427,45 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advanceTopUpTotal','updatedBy','updatedAt']);
     }
 
+    function linkExistingEstimate(recordId) {
+      let next = request.resource.data;
+      let allocationId = next.get('advanceAllocationId', '');
+      let allocationPath = /databases/$(database)/documents/advanceAllocations/$(allocationId);
+      let allocation = getAfter(allocationPath).data;
+      let batch = get(/databases/$(database)/documents/advanceBatches/$(next.advanceBatchId)).data;
+      let categoryIds = batch.get('categoryIds', []);
+      return allocationId != ''
+        && !exists(allocationPath)
+        && !linked(resource.data)
+        && !recordLocked()
+        && resource.data.get('deleted', false) == false
+        && resource.data.get('estimated', false) == true
+        && (manager() || (ownBatch(batch) && resource.data.ownerEmail == email()))
+        && batch.get('deleted', false) == false
+        && batch.planId == resource.data.planId
+        && batch.semester == resource.data.semester
+        && (resource.data.categoryId in categoryIds
+          || (categoryIds.size() == 0 && batch.get('categoryId', '') == resource.data.categoryId))
+        && allocation.expenseRecordId == recordId
+        && allocation.batchId == next.advanceBatchId
+        && allocation.planId == resource.data.planId
+        && allocation.categoryId == resource.data.categoryId
+        && allocation.ownerEmail == resource.data.ownerEmail
+        && allocation.estimatedAmount == resource.data.amount
+        && allocation.createdBy == email()
+        && allocation.recordOrigin == 'existing-estimate'
+        && allocation.get('deleted', false) == false
+        && next.advanceLinked == true
+        && next.originalEstimatedAmount == resource.data.get('originalEstimatedAmount', resource.data.amount)
+        && next.updatedAt == request.time
+        && next.updatedBy == email()
+        && next.diff(resource.data).affectedKeys().hasOnly([
+          'advanceAllocationId','advanceBatchId','advanceLinked','originalEstimatedAmount','updatedAt','updatedBy'
+        ]);
+    }
+
     match /expenseRecords/{recordId} {
+      allow update: if enabledUser() && linkExistingEstimate(recordId);
       allow update: if managerAdvanceTopUp() && linked(resource.data)
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.expenseRecordId == recordId
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.advanceTopUpTotal == request.resource.data.advanceTopUpTotal;
