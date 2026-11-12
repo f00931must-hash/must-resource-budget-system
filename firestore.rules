@@ -466,6 +466,28 @@ service cloud.firestore {
 
     match /expenseRecords/{recordId} {
       allow update: if enabledUser() && linkExistingEstimate(recordId);
+
+      // Confirm an actual refund and synchronize only the linked expense balance.
+      allow update: if enabledUser()
+        && linked(resource.data)
+        && resource.data.get('deleted', false) == false
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.amount >= 0
+        && request.resource.data.amount < resource.data.amount
+        && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount','updatedAt','updatedBy'])
+            && payoutExpenseRefund())
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'amount','refundAdjustment','actualAdjustment','updatedAt','updatedBy'
+              ])
+            && refundAmountApproval()
+            && adjustmentProtected()
+            && request.resource.data.refundAdjustment.allocationId == resource.data.advanceAllocationId
+            && request.resource.data.refundAdjustment.remainingAmount == request.resource.data.amount
+            && request.resource.data.refundAdjustment.confirmedBy == email()
+            && request.resource.data.refundAdjustment.confirmedAt == request.time)
+        );
       allow update: if managerAdvanceTopUp() && linked(resource.data)
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.expenseRecordId == recordId
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.advanceTopUpTotal == request.resource.data.advanceTopUpTotal;
