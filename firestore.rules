@@ -464,7 +464,25 @@ service cloud.firestore {
         ]);
     }
 
+    function eligibleExpenseOwner(target) {
+      let user = get(/databases/$(database)/documents/users/$(target)).data;
+      return user.enabled == true && user.get('role', '') != 'assistant';
+    }
+
     match /expenseRecords/{recordId} {
+      allow update: if enabledUser() && manager()
+        && !recordLocked() && !linked(resource.data)
+        && resource.data.get('deleted', false) == false
+        && request.resource.data.ownerEmail is string
+        && request.resource.data.ownerName is string
+        && request.resource.data.ownerEmail != resource.data.ownerEmail
+        && eligibleExpenseOwner(request.resource.data.ownerEmail)
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'ownerEmail','ownerName','updatedAt','updatedBy'
+        ]);
+
       // Moving an unlocked, unallocated record to the recycle bin does not edit its financial fields.
       allow update: if enabledUser()
         && (manager() || resource.data.ownerEmail == email())
