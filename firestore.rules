@@ -586,8 +586,8 @@ service cloud.firestore {
         && (
           (
             !recordLocked()
-            && hasVoucher(resource.data)
-            && amountConfirmed(resource.data)
+            && ((hasVoucher(resource.data) && amountConfirmed(resource.data))
+              || resource.data.get('amountConfirmedByManagerWaiver', false) == true)
             && request.resource.data.reviewStatus == 'approved'
             && request.resource.data.reviewed == true
             && request.resource.data.locked == true
