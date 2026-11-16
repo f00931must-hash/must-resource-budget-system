@@ -484,6 +484,9 @@ function openNewRecord(){
   $("recordAmount").readOnly=false; $("recordAmount").style.backgroundColor=""; $("recordAmount").style.color=""; $("recordActualAdjustmentWrap").classList.add("hidden");
   $("recordForm").reset(); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄";
   renderRecordOwnerOptions(state.user.email.toLowerCase());
+  if($("recordOwner"))$("recordOwner").disabled=false;
+  $("recordChangeOwnerBtn")?.classList.add("hidden");
+  $("recordOwnerLinkedHint")?.classList.add("hidden");
   $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; updateRecordRequirements(); $("recordDialog").showModal();
 }
 async function openEditRecord(id){
@@ -506,6 +509,9 @@ async function openEditRecord(id){
     $("existingVoucherBox").innerHTML=`目前附件：<a class="text-link" target="_blank" rel="noopener" href="${escAttr(r.voucherUrl||r.folderUrl)}">${esc(r.voucherFileName||"查看既有核銷單據")}</a><br><small>如重新選擇檔案，儲存後會以新附件取代。</small>`;
   }else { $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; }
   const linked=!!r.advanceAllocationId;
+  if($("recordOwner"))$("recordOwner").disabled=linked;
+  $("recordChangeOwnerBtn")?.classList.toggle("hidden",!isManager()||linked);
+  $("recordOwnerLinkedHint")?.classList.toggle("hidden",!linked||!isManager());
   if(linked)$("recordAmount").value=accountingAmount(r);
   $("recordAmount").readOnly=linked;
   $("recordAmount").style.backgroundColor=linked?"#e5e7eb":"";
@@ -552,6 +558,33 @@ async function uploadVoucherFile(file){
   const data=await uploadServiceRequest("/upload",{method:"POST",body:form}), u=data.file||{};
   return {path:u.path||githubPathFromUrl(u.url),url:u.url||"",name:u.name||file.name,size:Number(u.size||file.size||0),type:u.type||file.type||""};
 }
+
+async function changeExpenseOwner(){
+  if(!isManager())return;
+  const id=$("recordId").value, existing=state.records.find(x=>x.id===id), btn=$("recordChangeOwnerBtn");
+  if(!existing||btn.disabled)return;
+  if(existing.advanceAllocationId)return toast("此筆已連結預支，請先解除原分配再變更負責老師。",8000);
+  const owner=selectedRecordOwner(existing);
+  if(owner.email===String(existing.ownerEmail||"").toLowerCase())return toast("請選擇另一位負責老師");
+  if(!state.budgetUsers.some(u=>u.email===owner.email))return toast("請選擇已啟用的老師");
+  if(!confirm("將此筆負責老師改為「"+owner.name+"」？只會儲存負責老師，表單內其他尚未儲存的欄位不會套用。"))return;
+  const actor=state.user.email.toLowerCase(), ref=doc(db,"expenseRecords",id), audit=doc(collection(db,"auditLogs"));
+  btn.disabled=true;
+  try{
+    await runTransaction(db,async tx=>{
+      const snap=await tx.get(ref), current=snap.data();
+      if(!current||current.deleted||isApproved(current)||current.locked||current.advanceAllocationId||current.ownerEmail!==existing.ownerEmail)throw Error("紀錄已鎖定、已分配或已變更，請重新開啟。");
+      tx.update(ref,{ownerEmail:owner.email,ownerName:owner.name,updatedAt:serverTimestamp(),updatedBy:actor});
+      tx.set(audit,{type:"expense-owner",targetId:id,planId:current.planId,action:"change-owner",before:{ownerEmail:current.ownerEmail||"",ownerName:current.ownerName||""},after:{ownerEmail:owner.email,ownerName:owner.name},actorEmail:actor,createdAt:serverTimestamp()});
+    });
+  }catch(err){toast("負責老師變更失敗："+err.message,8000);return;}
+  finally{btn.disabled=false;}
+  $("recordDialog").close();
+  toast("已變更負責老師");
+  try{await loadPlanData();renderAll();}catch(err){toast("已變更負責老師，請重新整理畫面。");}
+}
+
+$("recordChangeOwnerBtn")?.addEventListener("click",changeExpenseOwner);
 
 async function saveRecord(e){
   e.preventDefault();
