@@ -470,7 +470,22 @@ service cloud.firestore {
       return user.enabled == true && user.get('role', '') != 'assistant';
     }
 
+    function validExpenseNumbers(data) {
+      return data.get('purchaseOrderNo', '') is string
+        && data.get('purchaseOrderNo', '').size() <= 80
+        && data.get('reimbursementNo', '') is string
+        && data.get('reimbursementNo', '').size() <= 80;
+    }
+
     match /expenseRecords/{recordId} {
+      allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
+        && !recordLocked() && resource.data.get('deleted', false) == false
+        && validExpenseNumbers(request.resource.data)
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
+        ]);
+
       // Managers review or reopen any active expense without changing its owner,
       // financial fields, voucher, or advance allocation.
       allow update: if manager()
@@ -628,7 +643,7 @@ service cloud.firestore {
           'purpose','note','ownerName','estimateStage','hanlongAdvance','archived',
           'amountConfirmed','reviewStatus','reviewed','locked','accountingVoucherAmount',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
-          'voucherFileSize','voucherFileType','updatedAt','updatedBy'
+          'voucherFileSize','voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
         ]);
 
       // Managers can attach a confirmed voucher on behalf of the record owner.
@@ -650,7 +665,7 @@ service cloud.firestore {
           'estimated','estimateStage','hanlongAdvance','archived','amountConfirmed',
           'reviewStatus','reviewed','locked','note','ownerName',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
-          'voucherFileSize','voucherFileType','accountingVoucherAmount','updatedAt','updatedBy'
+          'voucherFileSize','voucherFileType','purchaseOrderNo','reimbursementNo','accountingVoucherAmount','updatedAt','updatedBy'
         ]);
 
       // An owner can edit an unallocated expense while it remains in an estimate stage.
@@ -671,7 +686,7 @@ service cloud.firestore {
           'categoryId','purpose','amount','semester','estimateStage','hanlongAdvance',
           'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
-          'voucherFileType','updatedAt','updatedBy'
+          'voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
         ])
         && request.resource.data.get('reviewStatus', 'estimated') == 'estimated'
         && request.resource.data.get('reviewed', false) == false
@@ -699,7 +714,7 @@ service cloud.firestore {
           'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
           'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
-          'voucherFileType','accountingVoucherAmount','updatedAt','updatedBy'
+          'voucherFileType','purchaseOrderNo','reimbursementNo','accountingVoucherAmount','updatedAt','updatedBy'
         ])
         && (!linked(resource.data) || (
           request.resource.data.amount == resource.data.amount
