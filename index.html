@@ -110,7 +110,7 @@
     <input type="hidden" id="recordId" />
     <label id="recordOwnerWrap" class="manager-only hidden">經費負責老師<select id="recordOwner"></select><small class="hint">管理員代為建立或修改時，可指定此筆經費屬於哪位老師；指定後該老師可修改自己的未鎖定紀錄。</small></label>
     <button type="button" id="recordChangeOwnerBtn" class="link-btn hidden">只儲存負責老師</button>
-    <small id="recordOwnerLinkedHint" class="hint hidden">此筆已連結預支，請先處理原分配才能變更負責老師。</small>
+    <small id="recordOwnerLinkedHint" class="hint hidden">此筆已連結預支。更正的是使用紀錄與會統對帳的負責老師；原預支領款人保留。</small>
     <label>經費項目<select id="recordCategory" required></select></label>
     <label>案名(與會統案名相同)<input id="recordPurpose" required maxlength="120" placeholder="例如：A4影印紙" /></label>
     <div class="two-cols"><label>金額<input id="recordAmount" required type="number" min="0" step="1" /></label><label>學期<input id="recordSemester" required maxlength="5" pattern="\d{3}-[12]" placeholder="例如：114-2、115-1" /></label></div>
