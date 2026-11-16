@@ -619,7 +619,22 @@ async function saveRecord(e){
     if(!file&&!oldUrl)return toast("實際金額申請請先附上核銷單據");
     if(!$("recordAdjustmentAmountConfirm").checked)return toast("請確認單據與申請的實際金額相同");
   }
-  if(!estimated&&!submitting){
+  // A manager correcting only an unlocked, unallocated amount does not
+  // resubmit the voucher or rewrite older owner/review fields.
+  const formStage=$("recordStageReimbursing")?.checked?"reimbursing":$("recordStagePurchasing")?.checked?"purchasing":"estimated";
+  const amountOnly=Boolean(id && existing && isManager() && !linked && !file
+    && !existing.deleted && !existing.locked && !existing.reviewed && existing.reviewStatus!=="approved"
+    && amount!==Number(existing.amount) && estimated===(existing.estimated===true)
+    && (!estimated || formStage===(existing.estimateStage||"estimated"))
+    && categoryId===existing.categoryId && semester===existing.semester
+    && $("recordPurpose").value.trim()===String(existing.purpose||"").trim()
+    && $("recordNote").value.trim()===String(existing.note||"").trim()
+    && $("recordArchived").checked===(existing.archived===true || !!oldUrl)
+    && $("recordAmountConfirm").checked===(existing.amountConfirmed===true || existing.amountManuallyConfirmed===true));
+  if(amountOnly && (!Number.isFinite(amount) || amount<0 || !$("recordAmount").value.trim())){
+    return toast("請輸入有效的非負金額");
+  }
+  if(!estimated&&!submitting&&!amountOnly){
     if(!file&&!oldUrl)return toast("正式核銷紀錄請先上傳核銷單據");
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
@@ -641,6 +656,12 @@ async function saveRecord(e){
     }
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(linked)data.amount=Number(existing.amount||0);
+    if(amountOnly){
+      await updateDoc(doc(db,"expenseRecords",id),{amount,updatedAt:data.updatedAt,updatedBy:data.updatedBy});
+      recordSaved=true;
+      $("recordDialog").close(); await loadPlanData(); renderAll(); toast("金額已更新");
+      return;
+    }
     if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     recordSaved=true;
     saveStep="畫面更新";
