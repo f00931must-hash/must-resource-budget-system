@@ -4,7 +4,7 @@
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, updateDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, updateDoc, addDoc, collection, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID="must-resource-budget-system";
 let reviewBusy=false;
@@ -66,7 +66,7 @@ async function reviewOnce(id){
     const {db,email,r}=await ctxFor(id);
     if(approved(r)) return;
     if(r.estimated===true) return alert("預估／請購中紀錄尚未進入正式核銷，不能核對完成。");
-    if(!hasVoucher(r) && !managerConfirmed(r)){
+    if(!hasVoucher(r) && r.amountConfirmedByManagerWaiver!==true){
       alert(r.voucherNotRequiredRequested===true
         ? "此筆老師已申請『此單無需附上單據』。請先按『免附單據』由管理員確認，再核對完成。"
         : "此筆缺少核銷單據。若確實不需附件，請先按『免附單據』確認。"
@@ -74,13 +74,22 @@ async function reviewOnce(id){
       return;
     }
     if(hasVoucher(r) && !amountConfirmed(r)) return alert("此筆尚未確認核銷單據與 Key 金額相同。");
-    const extra=managerConfirmed(r)&&!hasVoucher(r)?"\n此筆已由管理員確認免附單據。":"";
-    if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money(r.amount)}${extra}\n\n完成後會鎖定。`)) return;
-    await updateDoc(doc(db,"expenseRecords",id),{
-      reviewStatus:"approved",reviewed:true,locked:true,
-      reviewedAt:serverTimestamp(),reviewedBy:email,updatedAt:serverTimestamp(),updatedBy:email
+    const extra=r.amountConfirmedByManagerWaiver===true&&!hasVoucher(r)?"\n此筆已由管理員確認免附單據。":"";
+    if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money(Number(r.amount||0)+Number(r.advanceTopUpTotal||0))}${extra}\n\n完成後會鎖定。`)) return;
+    const ref=doc(db,"expenseRecords",id), audit=doc(collection(db,"auditLogs"));
+    await runTransaction(db,async tx=>{
+      const snap=await tx.get(ref), current=snap.data();
+      if(!current || current.deleted || current.estimated===true || approved(current))
+        throw new Error("紀錄已變更或鎖定，請重新整理後確認。");
+      const voucher=hasVoucher(current), waived=current.amountConfirmedByManagerWaiver===true;
+      if((!voucher && !waived) || (voucher && !amountConfirmed(current)))
+        throw new Error("單據或免附確認已變更，請重新整理後確認。");
+      if(["ownerEmail","accountingOwnerEmail","amount","advanceTopUpTotal","voucherUrl","folderUrl","voucherWaiverManagerConfirmed","amountConfirmedByManagerWaiver"].some(key=>current[key]!==r[key]))
+        throw new Error("負責老師、金額或單據已變更，請重新整理後確認。");
+      tx.update(ref,{reviewStatus:"approved",reviewed:true,locked:true,
+        reviewedAt:serverTimestamp(),reviewedBy:email,updatedAt:serverTimestamp(),updatedBy:email});
+      tx.set(audit,{type:"expense-review",targetId:id,planId:current.planId||"",action:!voucher&&waived?"approve-manager-waived-voucher":"approve",actorEmail:email,createdAt:serverTimestamp()});
     });
-    await addDoc(collection(db,"auditLogs"),{type:"expense-review",targetId:id,planId:r.planId||"",action:managerConfirmed(r)&&!hasVoucher(r)?"approve-manager-waived-voucher":"approve",actorEmail:email,createdAt:serverTimestamp()});
     location.reload();
   }catch(err){ alert("核對失敗："+(err?.message||err)); }
   finally{ reviewBusy=false; }
