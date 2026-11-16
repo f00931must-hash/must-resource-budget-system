@@ -197,7 +197,8 @@ service cloud.firestore {
     }
 
     function linked(data) {
-      return data.get('advanceAllocationId', '') != '';
+      let allocationId = data.get('advanceAllocationId', '');
+      return allocationId != null && allocationId != '';
     }
     function adjustmentApproval() {
       let before = resource.data.get('actualAdjustment', {});
@@ -470,6 +471,22 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+      // Direct amount correction for an active expense without an advance allocation.
+      // The manager may correct their own expense or one belonging to another teacher.
+      // Owner permission is based on the saved record, never on an incoming owner field.
+      allow update: if (manager() || (enabledUser()
+          && resource.data.ownerEmail == email()
+          && submissionComplete(request.resource.data)))
+        && !recordLocked() && !linked(resource.data)
+        && resource.data.get('deleted', false) == false
+        && request.resource.data.amount is number
+        && request.resource.data.amount >= 0
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'amount','updatedAt','updatedBy'
+        ]);
+
       allow update: if enabledUser() && manager() && linked(resource.data)
         && !recordLocked() && resource.data.get('deleted',false) == false
         && request.resource.data.accountingOwnerEmail is string
