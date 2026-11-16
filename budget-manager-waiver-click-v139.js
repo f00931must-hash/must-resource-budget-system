@@ -62,6 +62,7 @@ async function revokeWaiver(id){
 async function reviewOnce(id){
   if(reviewBusy) return;
   reviewBusy=true;
+  let phase="讀取管理員資格與紀錄";
   try{
     const {db,email,r}=await ctxFor(id);
     if(approved(r)) return;
@@ -77,7 +78,9 @@ async function reviewOnce(id){
     const extra=r.amountConfirmedByManagerWaiver===true&&!hasVoucher(r)?"\n此筆已由管理員確認免附單據。":"";
     if(!confirm(`確認「${r.purpose||"此筆"}」核對完成？\n${money(Number(r.amount||0)+Number(r.advanceTopUpTotal||0))}${extra}\n\n完成後會鎖定。`)) return;
     const ref=doc(db,"expenseRecords",id), audit=doc(collection(db,"auditLogs"));
+    phase="重新讀取紀錄";
     await runTransaction(db,async tx=>{
+      phase="重新讀取紀錄";
       const snap=await tx.get(ref), current=snap.data();
       if(!current || current.deleted || current.estimated===true || approved(current))
         throw new Error("紀錄已變更或鎖定，請重新整理後確認。");
@@ -86,12 +89,13 @@ async function reviewOnce(id){
         throw new Error("單據或免附確認已變更，請重新整理後確認。");
       if(["ownerEmail","accountingOwnerEmail","amount","advanceTopUpTotal","voucherUrl","folderUrl","voucherWaiverManagerConfirmed","amountConfirmedByManagerWaiver"].some(key=>current[key]!==r[key]))
         throw new Error("負責老師、金額或單據已變更，請重新整理後確認。");
+      phase="儲存核對與操作紀錄";
       tx.update(ref,{reviewStatus:"approved",reviewed:true,locked:true,
         reviewedAt:serverTimestamp(),reviewedBy:email,updatedAt:serverTimestamp(),updatedBy:email});
       tx.set(audit,{type:"expense-review",targetId:id,planId:current.planId||"",action:!voucher&&waived?"approve-manager-waived-voucher":"approve",actorEmail:email,createdAt:serverTimestamp()});
     });
     location.reload();
-  }catch(err){ alert("核對失敗："+(err?.message||err)); }
+  }catch(err){ alert(`核對失敗（${phase}｜1.12.10）：${err?.code?err.code+"：":""}${err?.message||err}`); }
   finally{ reviewBusy=false; }
 }
 
