@@ -37,7 +37,7 @@ function specificShortTitle(a,b){
   return !generic.test(a);
 }
 const itemKey=s=>s.includes("及")?s.split("及").sort().join("及"):s;
-function titleRank(a,b,person,truncated){
+function titleRank(a,b,truncated){
   if(a.length>b.length)[a,b]=[b,a];
   if(a.length<4)return 0;
   if(a===b&&!truncated)return 3;
@@ -45,10 +45,10 @@ function titleRank(a,b,person,truncated){
   if(numbers(a)&&numbers(b)&&numbers(a)!==numbers(b))return 0;
   const x=core(a),y=core(b);
   if(x.length>=4&&!truncated&&(x===y||itemKey(x)===itemKey(y)))return 3;
-  if(truncated&&person&&a.length>=8&&a.length*2>=b.length&&b.startsWith(a))return 2;
+  if(truncated&&a.length>=8&&a.length*2>=b.length&&b.startsWith(a))return 2;
   if(truncated)return 0;
   if(x.length>=4&&y.length>=4&&(x.includes(y)||y.includes(x))&&Math.min(x.length,y.length)*2>=Math.max(x.length,y.length))return 2;
-  if(!person||a.length<5||a.length*2<b.length)return 0;
+  if(a.length<5||a.length*2<b.length)return 0;
   let i=0;for(const ch of b)if(ch===a[i])i++;
   const meaningful=s=>s.replace(/合理調整|推廣文宣品|宣導品|資源教室|會議|工作坊|研習|活動|費用|經費|年度|學期|採購|用品|耗材/g,"");
   const m=meaningful(a),n=meaningful(b);
@@ -129,16 +129,14 @@ export function calculateShots(rows,records){
       const quoteKey=quoteFragment?nameKey(quoteFragment):"";
       const localQuote=quotedTitle(r.name);
       const quotePrefix=quoteKey.length>=8&&(localQuote?nameKey(localQuote):n).startsWith(quoteKey);
-      const truncatedPrefix=truncated&&person&&((n.startsWith(key)&&key.length>=(sameTerm?7:10))||quotePrefix);
-      const match=titleRank(n,key,person,truncated)||(truncatedPrefix?2:0);
+      const truncatedPrefix=truncated&&((n.startsWith(key)&&key.length>=(sameTerm?7:10))||quotePrefix);
+      const match=Math.max(titleRank(n,key,truncated),quoted?titleRank(n,nameKey(quoted),false):0,truncatedPrefix?2:0);
       const alias=person&&sameAmount&&careerAlias(n,quoted?nameKey(quoted):key);
-      const termBonus=term&&term===sourceTerm?2:0;
-      if(sameAmount&&(match||alias))rank=Math.max(rank,(match||1)*10+termBonus+(person?1:0));
-      else if(draftZero&&person&&(match===3||truncatedPrefix))rank=Math.max(rank,4+termBonus);
-      else if(match===3){
-        const distinctive=core(n)===core(key)&&core(n).length>=10;
-        if(person||distinctive)rank=Math.max(rank,5+termBonus+(person?1:0));
-      }else if(person&&!truncated&&match===2&&specificShortTitle(n,key))rank=Math.max(rank,3+termBonus);
+      const strength=match||(alias?1:0);
+      if(strength===3||(sameAmount&&strength)||(draftZero&&person&&truncatedPrefix)||
+         (!truncated&&strength===2&&specificShortTitle(n,key))){
+        rank=Math.max(rank,strength*20+(sameAmount?4:0)+(person?1:0));
+      }
     }
     return rank?{i,rank}:null;
   }).filter(Boolean));
@@ -225,6 +223,15 @@ function book(result){
   totals.addRows([["項目","結果"],["對帳口徑","兩邊均扣除輔導人員費"],["會統：未轉入核銷的請購",result.pendingAmount],["會統：核銷",result.claimAmount],["會統合計（已去重）",result.accounting],["資教：已核銷",result.budgetClaimed],["資教：已預估（含請購中、核銷中）",result.estimated],["資教合計",result.budget],["差額（資教－會統）",result.delta],["未找到的關聯單號",result.missing.join("、")]]);
   const full=wb.addWorksheet("完整對帳明細",{views:[{state:"frozen",ySplit:1}]});
   const sourceRows=result.sourceRows||[];
+  const knownNames=unique([...sourceRows.map(row=>applicantKey(row.applicant)),...result.fullDetails.map(row=>applicantKey(row.r?.applicant))]);
+  const exportName=name=>{
+    const key=applicantKey(name);
+    if(key==="欣雅")return "張欣雅";
+    if(key==="馨云")return "張馨云";
+    if(key.length!==2)return norm(name);
+    const matches=knownNames.filter(n=>n.length===3&&n.endsWith(key));
+    return matches.length===1?matches[0]:norm(name);
+  };
   const sourceFor=(group)=>{
     const related=sourceRows.filter(p=>p.kind==="purchase"&&group.some(g=>g.kind==="claim"&&(g.related.includes(p.id)||p.related.includes(g.id))));
     return unique([...group,...related].map(g=>g.code)).join("／")||(group.length?"未提供":"");
@@ -233,7 +240,7 @@ function book(result){
     sheet.columns=[26,22,37,15,17,23,24,43,17,16,50,...(all?[48,24]:[])].map(width=>({width}));
     sheet.addRow(["結果","申請人","資教案名","資教狀態","資教金額","請購單號","核銷單號","會統案名","會統計入金額","差額","會統預算來源",...(all?["會統原始金額（按單號）","資教經費項目"]:[])]);
     for(const {type,r,group,amount,difference} of items){
-      const row=sheet.addRow([type,unique(group.map(g=>g.applicant)).join("／")||r?.applicant,r?.name,r?.stage,r?.amount,
+      const row=sheet.addRow([type,unique(group.map(g=>exportName(g.applicant))).join("／")||exportName(r?.applicant),r?.name,r?.stage,r?.amount,
         group.filter(g=>g.kind==="purchase").map(g=>g.id).join("、"),group.filter(g=>g.kind==="claim").map(g=>g.id).join("、"),unique(group.map(g=>g.name)).join("／"),amount,difference,sourceFor(group),
         ...(all?[group.map(g=>g.id+"："+g.amount.toLocaleString("zh-TW")).join("／"),r?.category]:[])]);
       if(typeof difference==="number"&&difference!==0)row.getCell(10).font={color:{argb:"FFC00000"},bold:true};
