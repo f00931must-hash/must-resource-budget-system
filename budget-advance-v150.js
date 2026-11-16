@@ -583,9 +583,12 @@ async function init(){
       if(!u.exists()||u.data().enabled!==true||!["manager","advance"].includes(u.data().role))return;
       ownOnly=u.data().role==="advance";
       installUI();
-      $("planSelect")?.addEventListener("change",()=>{activeBatchId="";loadAll().catch(showError);});
-      await loadAll();
-      if(location.hash==="#advance") $("advanceTab")?.click();
+      $("planSelect")?.addEventListener("change",()=>{
+        activeBatchId="";
+        if($("advance")?.classList.contains("active-view"))loadAll().catch(showError);
+      });
+      // The refresh bridge restores #advance once the selected plan is ready.
+      // Normal sign-in does not load the advance collections.
     }catch(err){showError(err);}
   });
 }
