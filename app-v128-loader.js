@@ -68,11 +68,12 @@ function openNewRecord`);
   const r=state.records.find(x=>x.id===id); if(!r)return;
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager()&&r.ownerEmail!==state.user.email.toLowerCase())return toast("只能刪除自己建立的使用紀錄");
+  if(r.advanceAllocationId)return toast("此筆已連結預支，請先到預支／動支處理分配，再移到回收桶。",8000);
   if(!confirm(\`確定將「\${r.purpose||"此筆"}」移到回收桶？\\n金額：\${money.format(r.amount||0)}\\n\\n10 天內可由管理員還原；附件不會因此刪除。\`))return;
   try{
     const actor=state.user.email.toLowerCase();
     await updateDoc(doc(db,"expenseRecords",id),{deleted:true,deletedAt:serverTimestamp(),deletedBy:actor,updatedAt:serverTimestamp(),updatedBy:actor});
-    if(isManager()) await addDoc(collection(db,"auditLogs"),{type:"recycle-bin",targetId:id,planId:state.activePlanId,action:"soft-delete-record",actorEmail:actor,createdAt:serverTimestamp()});
+    if(isManager()) await addDoc(collection(db,"auditLogs"),{type:"recycle-bin",targetId:id,planId:state.activePlanId,action:"soft-delete-record",actorEmail:actor,createdAt:serverTimestamp()}).catch(err=>console.error("回收桶操作紀錄寫入失敗",err));
     await loadPlanData(); renderAll(); toast("使用紀錄已移到回收桶，10 天內可由管理員還原");
   }catch(err){ toast(\`刪除失敗：\${err.message}\`,5000); }
 }
