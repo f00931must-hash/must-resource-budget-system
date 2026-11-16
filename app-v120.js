@@ -80,7 +80,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
         return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
           name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
           amount:accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
-          applicant:budgetUserName(r.ownerEmail,r.ownerName),
+          applicant:responsibleExpenseName(r),
           accountingId:r.accountingId
         }));
       },
@@ -342,7 +342,7 @@ function renderSemesterOptions(){
 
 function recordTeacherKey(record){
   const email=String(record.ownerEmail||"").trim().toLowerCase();
-  const name=String(record.ownerName||"").trim();
+  const name=String(responsibleExpenseName(record)||"").trim();
   return email ? "email:"+email : name ? "name:"+name : "";
 }
 
@@ -355,7 +355,7 @@ function renderTeacherOptions(){
     if(record.deleted===true)continue;
     const key=recordTeacherKey(record);
     if(!key)continue;
-    const name=String(record.ownerName||"").trim();
+    const name=String(responsibleExpenseName(record)||"").trim();
     if(!teachers.has(key)||(!teachers.get(key).name&&name)){
       teachers.set(key,{name,email:record.ownerEmail});
     }
@@ -411,7 +411,7 @@ function renderRecords(){
     if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;
     if(isManager() && approved) actions+=`<button class="link-btn unlock" data-unlock-record="${r.id}">解鎖</button>`;
     return `<article class="record-card ${approved?'locked':''}">
-      <div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(r.ownerName||r.ownerEmail||"")}</small></div>
+      <div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(responsibleExpenseName(r))}</small></div>
       <div><strong>${money.format(accountingAmount(r))}</strong><small>學期：${esc(r.semester||"未填")}</small></div>
       <div>${statusBadge}${issues}</div>
       <div><small>核銷單據</small><div>${evidenceUrl?`<a class="text-link" target="_blank" rel="noopener" href="${escAttr(evidenceUrl)}">${esc(r.voucherFileName||"查看附件")}</a>`:"—"}</div></div>
@@ -500,7 +500,7 @@ async function openEditRecord(id){
   }catch(err){return toast("讀取最新使用紀錄失敗："+err.message,5000);}
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager() && r.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
-  $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(r.ownerEmail||"",r.ownerName||""); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
+  $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(responsibleExpenseEmail(r),responsibleExpenseName(r)); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
   $("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
   $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
@@ -509,8 +509,8 @@ async function openEditRecord(id){
     $("existingVoucherBox").innerHTML=`目前附件：<a class="text-link" target="_blank" rel="noopener" href="${escAttr(r.voucherUrl||r.folderUrl)}">${esc(r.voucherFileName||"查看既有核銷單據")}</a><br><small>如重新選擇檔案，儲存後會以新附件取代。</small>`;
   }else { $("existingVoucherBox").classList.add("hidden"); $("existingVoucherBox").innerHTML=""; }
   const linked=!!r.advanceAllocationId;
-  if($("recordOwner"))$("recordOwner").disabled=linked;
-  $("recordChangeOwnerBtn")?.classList.toggle("hidden",!isManager()||linked);
+  if($("recordOwner"))$("recordOwner").disabled=false;
+  $("recordChangeOwnerBtn")?.classList.toggle("hidden",!isManager());
   $("recordOwnerLinkedHint")?.classList.toggle("hidden",!linked||!isManager());
   if(linked)$("recordAmount").value=accountingAmount(r);
   $("recordAmount").readOnly=linked;
@@ -559,26 +559,29 @@ async function uploadVoucherFile(file){
   return {path:u.path||githubPathFromUrl(u.url),url:u.url||"",name:u.name||file.name,size:Number(u.size||file.size||0),type:u.type||file.type||""};
 }
 
+function responsibleExpenseEmail(r){return r.accountingOwnerEmail||r.ownerEmail||"";}
+function responsibleExpenseName(r){return budgetUserName(responsibleExpenseEmail(r),r.accountingOwnerName||r.ownerName);}
+
 async function changeExpenseOwner(){
   if(!isManager())return;
   const id=$("recordId").value, existing=state.records.find(x=>x.id===id), btn=$("recordChangeOwnerBtn");
-  if(!existing||btn.disabled)return;
-  if(existing.advanceAllocationId)return toast("此筆已連結預支，請先解除原分配再變更負責老師。",8000);
+  if(!existing||btn?.disabled)return;
+  const linked=!!existing.advanceAllocationId;
   const owner=selectedRecordOwner(existing);
-  if(owner.email===String(existing.ownerEmail||"").toLowerCase())return toast("請選擇另一位負責老師");
+  if(owner.email===String(responsibleExpenseEmail(existing)).toLowerCase())return toast("請選擇另一位負責老師");
   if(!state.budgetUsers.some(u=>u.email===owner.email))return toast("請選擇已啟用的老師");
   if(!confirm("將此筆負責老師改為「"+owner.name+"」？只會儲存負責老師，表單內其他尚未儲存的欄位不會套用。"))return;
   const actor=state.user.email.toLowerCase(), ref=doc(db,"expenseRecords",id), audit=doc(collection(db,"auditLogs"));
-  btn.disabled=true;
+  if(btn)btn.disabled=true;
   try{
     await runTransaction(db,async tx=>{
       const snap=await tx.get(ref), current=snap.data();
-      if(!current||current.deleted||isApproved(current)||current.locked||current.advanceAllocationId||current.ownerEmail!==existing.ownerEmail)throw Error("紀錄已鎖定、已分配或已變更，請重新開啟。");
-      tx.update(ref,{ownerEmail:owner.email,ownerName:owner.name,updatedAt:serverTimestamp(),updatedBy:actor});
-      tx.set(audit,{type:"expense-owner",targetId:id,planId:current.planId,action:"change-owner",before:{ownerEmail:current.ownerEmail||"",ownerName:current.ownerName||""},after:{ownerEmail:owner.email,ownerName:owner.name},actorEmail:actor,createdAt:serverTimestamp()});
+      if(!current||current.deleted||isApproved(current)||current.locked||current.advanceAllocationId!==existing.advanceAllocationId||current.ownerEmail!==existing.ownerEmail||responsibleExpenseEmail(current)!==responsibleExpenseEmail(existing))throw Error("紀錄已鎖定、已分配或已變更，請重新開啟。");
+      tx.update(ref,{...(linked?{accountingOwnerEmail:owner.email,accountingOwnerName:owner.name}:{ownerEmail:owner.email,ownerName:owner.name,...(current.accountingOwnerEmail?{accountingOwnerEmail:"",accountingOwnerName:""}:{})}),updatedAt:serverTimestamp(),updatedBy:actor});
+      tx.set(audit,{type:"expense-owner",targetId:id,planId:current.planId,action:linked?"change-accounting-owner":"change-owner",before:{ownerEmail:responsibleExpenseEmail(current),ownerName:responsibleExpenseName(current)},after:{ownerEmail:owner.email,ownerName:owner.name},actorEmail:actor,createdAt:serverTimestamp()});
     });
   }catch(err){toast("負責老師變更失敗："+err.message,8000);return;}
-  finally{btn.disabled=false;}
+  finally{if(btn)btn.disabled=false;}
   $("recordDialog").close();
   toast("已變更負責老師");
   try{await loadPlanData();renderAll();}catch(err){toast("已變更負責老師，請重新整理畫面。");}
@@ -592,6 +595,7 @@ async function saveRecord(e){
   if(!id&&!isPlanActive())return toast("此計畫已停用，無法新增使用紀錄");
   if(existing&&isApproved(existing))return toast("此筆已核銷並鎖定，請先解鎖");
   if(existing&&!isManager()&&existing.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
+  if(existing&&isManager()&&selectedRecordOwner(existing).email!==responsibleExpenseEmail(existing).toLowerCase())return changeExpenseOwner();
   const categoryId=$("recordCategory").value, amount=Number($("recordAmount").value||0), semester=$("recordSemester").value.trim(), estimated=$("recordEstimated").checked;
   const linked=!!existing?.advanceAllocationId;
   if(linked&&categoryId!==existing.categoryId)return toast("已分配經費項目鎖定");
@@ -896,7 +900,7 @@ async function downloadBudgetExcel(){
       hr.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true,align:"center"}));
       currentRow++;
       cr.forEach(r=>{
-        const owner=r.ownerName||budgetUserName(r.ownerEmail,"");
+        const owner=responsibleExpenseName(r);
         const voucher=(r.voucherUrl||r.folderUrl)?"有":"無";
         const confirmed=r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true||r.amountConfirmedByManagerWaiver===true?"已確認":"未確認");
         const created=excelDateTime(r.createdAt),updated=excelDateTime(r.updatedAt),createdBy=budgetUserName(r.createdBy,""),updatedBy=budgetUserName(r.updatedBy,"");
@@ -943,7 +947,7 @@ async function downloadBudgetExcel(){
       currentRow++;
       other.forEach(r=>{
         const row=detail.getRow(currentRow++);
-        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",r.ownerName||budgetUserName(r.ownerEmail,""),accountingAmount(r),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,"")];
+        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",responsibleExpenseName(r),accountingAmount(r),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,"")];
         row.eachCell((cell,col)=>budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"}));
         budgetExcelMoney(row.getCell(5));
         if(row.getCell(11).value instanceof Date)row.getCell(11).numFmt="yyyy-mm-dd hh:mm";
