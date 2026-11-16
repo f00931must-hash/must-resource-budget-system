@@ -465,6 +465,20 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+      // Moving an unlocked, unallocated record to the recycle bin does not edit its financial fields.
+      allow update: if enabledUser()
+        && (manager() || resource.data.ownerEmail == email())
+        && !recordLocked() && !linked(resource.data)
+        && resource.data.get('deleted', false) == false
+        && request.resource.data.deleted == true
+        && request.resource.data.deletedBy == email()
+        && request.resource.data.deletedAt == request.time
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'deleted','deletedAt','deletedBy','updatedAt','updatedBy'
+        ]);
+
       allow update: if enabledUser() && linkExistingEstimate(recordId);
 
       // Confirm an actual refund and synchronize only the linked expense balance.
