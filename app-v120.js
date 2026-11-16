@@ -502,6 +502,8 @@ async function openEditRecord(id){
   if(!isManager() && r.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
   $("recordForm").reset(); $("recordId").value=id; renderRecordOwnerOptions(responsibleExpenseEmail(r),responsibleExpenseName(r)); $("recordCategory").value=r.categoryId||""; $("recordPurpose").value=r.purpose||"";
   $("recordAmount").value=r.amount||0; $("recordSemester").value=r.semester||""; $("recordEstimated").checked=r.estimated===true;
+  if($("recordPurchaseOrderNo"))$("recordPurchaseOrderNo").value=r.purchaseOrderNo||"";
+  if($("recordReimbursementNo"))$("recordReimbursementNo").value=r.reimbursementNo||"";
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
   $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
   if(r.voucherUrl||r.folderUrl){
@@ -622,19 +624,30 @@ async function saveRecord(e){
   // A manager correcting only an unlocked, unallocated amount does not
   // resubmit the voucher or rewrite older owner/review fields.
   const formStage=$("recordStageReimbursing")?.checked?"reimbursing":$("recordStagePurchasing")?.checked?"purchasing":"estimated";
-  const amountOnly=Boolean(id && existing && isManager() && !linked && !file
+  const numberChanges={};
+  for(const [key,input] of [["purchaseOrderNo","recordPurchaseOrderNo"],["reimbursementNo","recordReimbursementNo"]]){
+    const field=$(input);
+    if(!field)continue;
+    const value=field.value.trim();
+    if(value!==String(existing?.[key]||""))numberChanges[key]=value;
+  }
+  const numbersChanged=Object.keys(numberChanges).length>0;
+  const unchangedOtherFields=Boolean(id && existing && !file
+    && ($("recordHanlongAdvance")?.checked===true)===(existing.hanlongAdvance===true)
     && !existing.deleted && !existing.locked && !existing.reviewed && existing.reviewStatus!=="approved"
-    && amount!==Number(existing.amount) && estimated===(existing.estimated===true)
+    && estimated===(existing.estimated===true)
     && (!estimated || formStage===(existing.estimateStage||"estimated"))
     && categoryId===existing.categoryId && semester===existing.semester
     && $("recordPurpose").value.trim()===String(existing.purpose||"").trim()
     && $("recordNote").value.trim()===String(existing.note||"").trim()
     && $("recordArchived").checked===(existing.archived===true || !!oldUrl)
     && $("recordAmountConfirm").checked===(existing.amountConfirmed===true || existing.amountManuallyConfirmed===true));
+  const numberOnly=unchangedOtherFields && numbersChanged && amount===(linked?accountingAmount(existing):Number(existing.amount));
+  const amountOnly=unchangedOtherFields && isManager() && !linked && amount!==Number(existing.amount);
   if(amountOnly && (!Number.isFinite(amount) || amount<0 || !$("recordAmount").value.trim())){
     return toast("請輸入有效的非負金額");
   }
-  if(!estimated&&!submitting&&!amountOnly){
+  if(!estimated&&!submitting&&!amountOnly&&!numberOnly){
     if(!file&&!oldUrl)return toast("正式核銷紀錄請先上傳核銷單據");
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
@@ -656,12 +669,13 @@ async function saveRecord(e){
     }
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(linked)data.amount=Number(existing.amount||0);
-    if(amountOnly){
-      await updateDoc(doc(db,"expenseRecords",id),{amount,updatedAt:data.updatedAt,updatedBy:data.updatedBy});
+    if(amountOnly||numberOnly){
+      await updateDoc(doc(db,"expenseRecords",id),{...(amountOnly?{amount}:{}),...numberChanges,updatedAt:data.updatedAt,updatedBy:data.updatedBy});
       recordSaved=true;
-      $("recordDialog").close(); await loadPlanData(); renderAll(); toast("金額已更新");
+      $("recordDialog").close(); await loadPlanData(); renderAll(); toast(amountOnly?"金額已更新":"單號已更新");
       return;
     }
+    Object.assign(data,numberChanges);
     if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
     recordSaved=true;
     saveStep="畫面更新";
@@ -896,11 +910,11 @@ async function downloadBudgetExcel(){
     ws.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};
 
     const detail=wb.addWorksheet("使用紀錄明細",{views:[{showGridLines:false,state:"frozen",ySplit:4}]});
-    const widths=[24,12,38,18,15,14,14,14,32,18,22,22];
+    const widths=[24,12,38,18,15,14,14,14,32,18,22,22,22,22];
     detail.columns=widths.map(width=>({width}));
-    budgetExcelMergeTitle(detail,"A1:L2","使用紀錄明細","FF243B53",17);
+    budgetExcelMergeTitle(detail,"A1:N2","使用紀錄明細","FF243B53",17);
     budgetExcelLink(detail.getCell("A3"),"← 回到經費總表","#'經費總表'!A1");
-    detail.mergeCells("B3:L3");
+    detail.mergeCells("B3:N3");
     detail.getCell("B3").value="依經費科目分區；總表中的科目名稱可直接跳到此處。";
     budgetExcelStyleCell(detail.getCell("B3"),{fill:"FFF4F6F8",fontColor:"FF667085"});
 
@@ -911,12 +925,12 @@ async function downloadBudgetExcel(){
         .sort((a,b)=>String(b.semester||"").localeCompare(String(a.semester||""),undefined,{numeric:true})||tsMillis(b.updatedAt||b.createdAt)-tsMillis(a.updatedAt||a.createdAt));
       if(!cr.length)return;
       const budget=Number(cat.budget||0),used=cr.reduce((s,r)=>s+accountingAmount(r),0);
-      detail.mergeCells(`A${currentRow}:L${currentRow}`);
+      detail.mergeCells(`A${currentRow}:N${currentRow}`);
       detail.getCell(`A${currentRow}`).value=`${cat.name||"未命名科目"}｜編列 ${budget.toLocaleString("zh-TW")} 元｜目前占用 ${used.toLocaleString("zh-TW")} 元｜剩餘 ${(budget-used).toLocaleString("zh-TW")} 元`;
       budgetExcelStyleCell(detail.getCell(`A${currentRow}`),{fill:"FF4E79A7",fontColor:"FFFFFFFF",bold:true,size:12});
       categoryDetailRows.set(cat.id,currentRow);
       currentRow++;
-      const headers=["經費科目","學期","用途／摘要","負責老師","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新"];
+      const headers=["經費科目","學期","用途／摘要","負責老師","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新","請購單號","核銷單號"];
       const hr=detail.getRow(currentRow);hr.values=headers;hr.height=28;
       hr.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFEAF2F8",fontColor:"FF486F9C",bold:true,align:"center"}));
       currentRow++;
@@ -938,7 +952,9 @@ async function downloadBudgetExcel(){
           r.note||"",
           createdBy,
           created,
-          [updatedBy,updated instanceof Date?updated.toLocaleString("zh-TW",{hour12:false}):""].filter(Boolean).join("\n")
+          [updatedBy,updated instanceof Date?updated.toLocaleString("zh-TW",{hour12:false}):""].filter(Boolean).join("\n"),
+          String(r.purchaseOrderNo||""),
+          String(r.reimbursementNo||"")
         ];
         row.eachCell((cell,col)=>{
           budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"});
@@ -958,17 +974,17 @@ async function downloadBudgetExcel(){
     const knownIds=new Set(categories.map(c=>c.id));
     const other=rows.filter(r=>!knownIds.has(r.categoryId));
     if(other.length){
-      detail.mergeCells(`A${currentRow}:L${currentRow}`);
+      detail.mergeCells(`A${currentRow}:N${currentRow}`);
       detail.getCell(`A${currentRow}`).value="未分類／舊版資料";
       budgetExcelStyleCell(detail.getCell(`A${currentRow}`),{fill:"FFB54A4A",fontColor:"FFFFFFFF",bold:true,size:12});
       currentRow++;
-      const headers=["經費科目","學期","用途／摘要","負責老師","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新"];
+      const headers=["經費科目","學期","用途／摘要","負責老師","金額","狀態","核銷單據","金額確認","備註","建立者","建立時間","最後更新","請購單號","核銷單號"];
       const hr=detail.getRow(currentRow);hr.values=headers;
       hr.eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FFFCE8E6",fontColor:"FFB54A4A",bold:true,align:"center"}));
       currentRow++;
       other.forEach(r=>{
         const row=detail.getRow(currentRow++);
-        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",responsibleExpenseName(r),accountingAmount(r),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,"")];
+        row.values=[r.categoryName||"未分類",r.semester||"",r.purpose||"",responsibleExpenseName(r),accountingAmount(r),recordStageText(r),(r.voucherUrl||r.folderUrl)?"有":"無",r.estimated===true?"不適用":(r.amountConfirmed===true||r.amountManuallyConfirmed===true?"已確認":"未確認"),r.note||"",budgetUserName(r.createdBy,""),excelDateTime(r.createdAt),budgetUserName(r.updatedBy,""),String(r.purchaseOrderNo||""),String(r.reimbursementNo||"")];
         row.eachCell((cell,col)=>budgetExcelStyleCell(cell,{align:[2,5,6,7,8].includes(col)?"center":"left"}));
         budgetExcelMoney(row.getCell(5));
         if(row.getCell(11).value instanceof Date)row.getCell(11).numFmt="yyyy-mm-dd hh:mm";
