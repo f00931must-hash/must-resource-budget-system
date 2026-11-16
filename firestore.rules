@@ -413,7 +413,7 @@ service cloud.firestore {
     }
 
     function accountingVoucherChangeAllowed() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accountingVoucherAmount','advanceTopUpTotal']);
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accountingVoucherAmount','advanceTopUpTotal','accountingOwnerEmail','accountingOwnerName']);
     }
 
     function managerAdvanceTopUp() {
@@ -470,17 +470,30 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+      allow update: if enabledUser() && manager() && linked(resource.data)
+        && !recordLocked() && resource.data.get('deleted',false) == false
+        && request.resource.data.accountingOwnerEmail is string
+        && request.resource.data.accountingOwnerName is string
+        && eligibleExpenseOwner(request.resource.data.accountingOwnerEmail)
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'accountingOwnerEmail','accountingOwnerName','updatedAt','updatedBy'
+        ]);
+
       allow update: if enabledUser() && manager()
         && !recordLocked() && !linked(resource.data)
         && resource.data.get('deleted', false) == false
         && request.resource.data.ownerEmail is string
         && request.resource.data.ownerName is string
-        && request.resource.data.ownerEmail != resource.data.ownerEmail
+        && request.resource.data.ownerEmail != resource.data.get('accountingOwnerEmail', resource.data.ownerEmail)
+        && request.resource.data.get('accountingOwnerEmail','') == ''
+        && request.resource.data.get('accountingOwnerName','') == ''
         && eligibleExpenseOwner(request.resource.data.ownerEmail)
         && request.resource.data.updatedBy == email()
         && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'ownerEmail','ownerName','updatedAt','updatedBy'
+          'ownerEmail','ownerName','accountingOwnerEmail','accountingOwnerName','updatedAt','updatedBy'
         ]);
 
       // Moving an unlocked, unallocated record to the recycle bin does not edit its financial fields.
@@ -527,7 +540,7 @@ service cloud.firestore {
       allow read: if enabledUser();
 
       allow create: if enabledUser()
-        && !request.resource.data.keys().hasAny(['accountingVoucherAmount','advanceTopUpTotal'])
+        && !request.resource.data.keys().hasAny(['accountingVoucherAmount','advanceTopUpTotal','accountingOwnerEmail','accountingOwnerName'])
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) == false
         && request.resource.data.get('locked', false) == false
