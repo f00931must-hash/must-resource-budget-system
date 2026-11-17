@@ -420,6 +420,7 @@ function renderRecords(){
       (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true?'<span class="status danger-badge">未確認金額</span>':'');
     let actions="";
     if(canEdit) actions+=`<button class="link-btn" data-edit-record="${r.id}">編輯</button><button class="link-btn danger" data-delete-record="${r.id}">刪除</button>`;
+    if(canEdit && !isManager() && evidenceUrl) actions+=`<button class="link-btn danger" data-detach-voucher="${escAttr(r.id)}">移除附件</button>`;
     if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;
     if(isManager() && approved) actions+=`<button class="link-btn unlock" data-unlock-record="${r.id}">解鎖</button>`;
     return `<article class="record-card ${approved?'locked':''}">
@@ -430,6 +431,7 @@ function renderRecords(){
       <div class="record-actions">${actions}</div>
     </article>`;
   }).join("");
+  document.querySelectorAll("[data-detach-voucher]").forEach(b=>b.onclick=()=>detachOwnVoucher(b.dataset.detachVoucher,b));
   document.querySelectorAll("[data-edit-record]").forEach(b=>b.onclick=()=>openEditRecord(b.dataset.editRecord));
   document.querySelectorAll("[data-delete-record]").forEach(b=>b.onclick=()=>deleteRecord(b.dataset.deleteRecord));
   document.querySelectorAll("[data-approve-record]").forEach(b=>b.onclick=()=>approveRecord(b.dataset.approveRecord));
@@ -655,7 +657,7 @@ async function saveRecord(e){
     && categoryId===existing.categoryId && semester===existing.semester
     && $("recordPurpose").value.trim()===String(existing.purpose||"").trim()
     && $("recordNote").value.trim()===String(existing.note||"").trim();
-  const managerCorrection=stableStageAndEvidence && isManager()
+  const managerCorrection=stableStageAndEvidence
     && categoryId===existing.categoryId && semester===existing.semester;
   const numberOnly=unchangedOtherFields && numbersChanged && amount===(linked?accountingAmount(existing):Number(existing.amount));
   const amountOnly=managerCorrection && !linked && amount!==Number(existing.amount);
@@ -713,6 +715,26 @@ async function saveRecord(e){
     if(recordSaved)toast("紀錄已儲存，但畫面更新失敗，請重新整理確認。",8000);
     else toast(`${saveStep}失敗：${err.message}`,8000);
   }finally{ $("recordSaveBtn").disabled=false; $("recordSaveBtn").textContent="儲存"; }
+}
+
+async function detachOwnVoucher(id,button){
+  if(button.disabled||!confirm("移除此筆使用紀錄的附件？金額與紀錄會保留。"))return;
+  button.disabled=true;
+  const actor=state.user?.email?.toLowerCase()||"";
+  let saved=false;
+  try{
+    const ref=doc(db,"expenseRecords",id);
+    await runTransaction(db,async tx=>{
+      const r=(await tx.get(ref)).data();
+      if(!r||r.deleted||r.locked||r.reviewed||r.reviewStatus==="approved")throw Error("紀錄已鎖定或不存在");
+      if(!actor||(!isManager()&&r.ownerEmail!==actor))throw Error("只能移除自己紀錄的附件");
+      tx.update(ref,{voucherUrl:"",folderUrl:"",voucherPath:"",voucherStoragePath:"",voucherFileName:"",
+        voucherFileType:"",voucherFileSize:0,archived:false,amountConfirmed:false,amountManuallyConfirmed:false,
+        updatedAt:serverTimestamp(),updatedBy:actor});
+    });
+    saved=true; await loadPlanData(); renderAll(); toast("附件已從紀錄移除");
+  }catch(err){toast(saved?"附件已移除，請重新整理清單":"移除附件失敗："+err.message,8000);}
+  finally{button.disabled=false;}
 }
 
 async function deleteRecord(id){
