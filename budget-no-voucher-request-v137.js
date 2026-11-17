@@ -130,7 +130,7 @@ async function saveRequestedRecord(){
     const displayedAmount=Number(existing.amount||0)+(linked?Number(existing.advanceTopUpTotal||0):0);
     if(linked && amount!==displayedAmount)throw new Error("預支已連結，請在預支流程調整金額。");
     const sameDetails=purpose===String(existing.purpose||"").trim() && note===String(existing.note||"").trim() && amount===displayedAmount;
-    if(isManager || sameDetails){
+    if(isManager || sameDetails || existing.ownerEmail===email){
       const patch={...numberChanges,updatedAt:serverTimestamp(),updatedBy:email};
       if(purpose!==String(existing.purpose||"").trim())patch.purpose=purpose;
       if(note!==String(existing.note||"").trim())patch.note=note;
