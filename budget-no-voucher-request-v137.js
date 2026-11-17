@@ -69,6 +69,7 @@ async function loadRequestForDialog(){
   const c=ctx(); if(!c) return;
   try{
     const snap=await getDoc(doc(c.db,"expenseRecords",id));
+    if(document.getElementById("recordId")?.value!==id) return;
     request.checked=snap.exists() && snap.data().voucherNotRequiredRequested===true;
   }catch(err){ console.warn("load no-voucher request failed",err); }
   syncRequestUI();
@@ -96,29 +97,53 @@ async function saveRequestedRecord(){
   if(amount<0) throw new Error("金額不可小於 0");
   if(file) throw new Error("已勾選「此單無需附上單據」，請不要另外選擇附件");
 
-  const [userSnap,planSnap,catSnap,existingSnap,recordsSnap]=await Promise.all([
+  const [userSnap,existingSnap]=await Promise.all([
     getDoc(doc(c.db,"users",email)),
-    getDoc(doc(c.db,"budgetPlans",planId)),
-    getDoc(doc(c.db,"budgetCategories",categoryId)),
-    id?getDoc(doc(c.db,"expenseRecords",id)):Promise.resolve(null),
-    getDocs(query(collection(c.db,"expenseRecords"),where("planId","==",planId)))
+    id?getDoc(doc(c.db,"expenseRecords",id)):Promise.resolve(null)
   ]);
   if(!userSnap.exists() || userSnap.data().enabled!==true) throw new Error("此帳號未獲授權");
-  const profile=userSnap.data();
-  const isManager=profile.role==="manager";
+  const profile=userSnap.data(), isManager=profile.role==="manager";
+  const existing=existingSnap?.exists()?existingSnap.data():null;
+  if(id && !existing) throw new Error("找不到此筆使用紀錄");
+  if(existing){
+    const locked=existing.deleted===true || existing.reviewStatus==="approved" || existing.reviewed===true || existing.locked===true;
+    if(locked) throw new Error("此筆已鎖定或刪除，無法修改");
+    if(!isManager && String(existing.ownerEmail||"").toLowerCase()!==email) throw new Error("只能修改自己負責的使用紀錄");
+  }
+
+  const numberChanges={};
+  for(const [key,input] of [["purchaseOrderNo","recordPurchaseOrderNo"],["reimbursementNo","recordReimbursementNo"]]){
+    const field=document.getElementById(input);
+    if(!field)continue;
+    const value=field.value.trim();
+    if(value.length>80)throw new Error("單號不能超過 80 個字");
+    if(value!==String(existing?.[key]||""))numberChanges[key]=value;
+  }
+  if(existing?.voucherNotRequiredRequested===true && Object.keys(numberChanges).length
+    && planId===existing.planId && categoryId===existing.categoryId && semester===existing.semester
+    && purpose===String(existing.purpose||"").trim() && note===String(existing.note||"").trim()
+    && amount===Number(existing.amount||0)+(existing.advanceAllocationId?Number(existing.advanceTopUpTotal||0):0)
+    && (document.getElementById("recordHanlongAdvance")?.checked===true)===(existing.hanlongAdvance===true)
+    && (!isManager || !document.getElementById("recordOwner")?.value
+      || document.getElementById("recordOwner").value===(existing.accountingOwnerEmail||existing.ownerEmail))){
+    await updateDoc(doc(c.db,"expenseRecords",id),{...numberChanges,updatedAt:serverTimestamp(),updatedBy:email});
+    document.getElementById("recordDialog")?.close();
+    location.reload();
+    return;
+  }
+
+  const [planSnap,catSnap,recordsSnap]=await Promise.all([
+    getDoc(doc(c.db,"budgetPlans",planId)),
+    getDoc(doc(c.db,"budgetCategories",categoryId)),
+    getDocs(query(collection(c.db,"expenseRecords"),where("planId","==",planId)))
+  ]);
   if(!planSnap.exists()) throw new Error("找不到目前計畫");
   if(!id && planSnap.data().active===false) throw new Error("此計畫已停用，無法新增使用紀錄");
   if(!catSnap.exists()) throw new Error("找不到經費項目");
   const cat=catSnap.data();
   if(cat.planId!==planId) throw new Error("經費項目不屬於目前計畫");
 
-  const existing=existingSnap?.exists()?existingSnap.data():null;
-  if(existing){
-    const locked=existing.reviewStatus==="approved" || existing.reviewed===true || existing.locked===true;
-    if(locked) throw new Error("此筆已核銷並鎖定，請先由管理員解鎖");
-    if(!isManager && String(existing.ownerEmail||"").toLowerCase()!==email) throw new Error("只能修改自己建立的使用紀錄");
-    if(existing.voucherUrl||existing.folderUrl) throw new Error("此筆已有附件，不需再申報免附單據");
-  }
+  if(existing?.voucherUrl||existing?.folderUrl) throw new Error("此筆已有附件，不需再申報免附單據");
 
   const used=recordsSnap.docs
     .map(d=>({id:d.id,...d.data()}))
@@ -136,13 +161,13 @@ async function saveRequestedRecord(){
     reviewStatus:"pending",reviewed:false,locked:false,note,
     ownerEmail:existing?.ownerEmail||email,
     ownerName:existing?.ownerName||profile.name||user.displayName||user.email,
-    createdBy:existing?.createdBy||email,
+    ...numberChanges,
     updatedAt:serverTimestamp(),updatedBy:email
   };
 
   // Preserve any existing manager-waiver fields on edit; teacher-side request must never create/change them.
   if(id) await updateDoc(doc(c.db,"expenseRecords",id),data);
-  else await addDoc(collection(c.db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
+  else await addDoc(collection(c.db,"expenseRecords"),{...data,createdBy:email,createdAt:serverTimestamp()});
 
   document.getElementById("recordDialog")?.close();
   location.reload();
