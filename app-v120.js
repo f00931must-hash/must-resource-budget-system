@@ -644,22 +644,25 @@ async function saveRecord(e){
     if(value!==String(existing?.[key]||""))numberChanges[key]=value;
   }
   const numbersChanged=Object.keys(numberChanges).length>0;
-  const unchangedOtherFields=Boolean(id && existing && !file
+  const stableStageAndEvidence=Boolean(id && existing && !file
     && ($("recordHanlongAdvance")?.checked===true)===(existing.hanlongAdvance===true)
     && !existing.deleted && !existing.locked && !existing.reviewed && existing.reviewStatus!=="approved"
     && estimated===(existing.estimated===true)
     && (!estimated || formStage===(existing.estimateStage||"estimated"))
-    && categoryId===existing.categoryId && semester===existing.semester
-    && $("recordPurpose").value.trim()===String(existing.purpose||"").trim()
-    && $("recordNote").value.trim()===String(existing.note||"").trim()
     && $("recordArchived").checked===(existing.archived===true || !!oldUrl)
     && $("recordAmountConfirm").checked===(existing.amountConfirmed===true || existing.amountManuallyConfirmed===true));
+  const unchangedOtherFields=stableStageAndEvidence
+    && categoryId===existing.categoryId && semester===existing.semester
+    && $("recordPurpose").value.trim()===String(existing.purpose||"").trim()
+    && $("recordNote").value.trim()===String(existing.note||"").trim();
+  const managerCorrection=stableStageAndEvidence && isManager()
+    && categoryId===existing.categoryId && semester===existing.semester;
   const numberOnly=unchangedOtherFields && numbersChanged && amount===(linked?accountingAmount(existing):Number(existing.amount));
-  const amountOnly=unchangedOtherFields && isManager() && !linked && amount!==Number(existing.amount);
+  const amountOnly=managerCorrection && !linked && amount!==Number(existing.amount);
   if(amountOnly && (!Number.isFinite(amount) || amount<0 || !$("recordAmount").value.trim())){
     return toast("請輸入有效的非負金額");
   }
-  if(!estimated&&!submitting&&!amountOnly&&!numberOnly){
+  if(!estimated&&!submitting&&!managerCorrection&&!numberOnly){
     if(!file&&!oldUrl)return toast("正式核銷紀錄請先上傳核銷單據");
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
@@ -681,10 +684,13 @@ async function saveRecord(e){
     }
     if(uploaded){ data.voucherFileName=uploaded.name; data.voucherPath=uploaded.path; data.voucherStoragePath=uploaded.path; data.voucherUrl=uploaded.url; data.voucherFileSize=uploaded.size; data.voucherFileType=uploaded.type; }
     if(linked)data.amount=Number(existing.amount||0);
-    if(amountOnly||numberOnly){
-      await updateDoc(doc(db,"expenseRecords",id),{...(amountOnly?{amount}:{}),...numberChanges,updatedAt:data.updatedAt,updatedBy:data.updatedBy});
+    if(managerCorrection||numberOnly){
+      const correction={...(amountOnly?{amount}:{}),...numberChanges,updatedAt:data.updatedAt,updatedBy:data.updatedBy};
+      if(managerCorrection && data.purpose!==String(existing.purpose||"").trim()) correction.purpose=data.purpose;
+      if(managerCorrection && data.note!==String(existing.note||"").trim()) correction.note=data.note;
+      await updateDoc(doc(db,"expenseRecords",id),correction);
       recordSaved=true;
-      $("recordDialog").close(); await loadPlanData(); renderAll(); toast(amountOnly?"金額已更新":"單號已更新");
+      $("recordDialog").close(); await loadPlanData(); renderAll(); toast(amountOnly?"金額已更新":numberOnly?"單號已更新":"使用紀錄已更新");
       return;
     }
     Object.assign(data,numberChanges);
