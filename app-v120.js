@@ -37,6 +37,18 @@ $("editPlanBtn").addEventListener("click", openEditPlan);
 $("deletePlanBtn").addEventListener("click", deleteCurrentPlan);
 $("planForm").addEventListener("submit", savePlan);
 $("newRecordBtn").addEventListener("click", openNewRecord);
+window.addEventListener("budget-expense-saved",async event=>{
+  const planId=event.detail?.planId;
+  if(!state.user||planId!==state.activePlanId)return;
+  try{
+    await loadPlanData();
+    renderAll();
+    toast("使用紀錄已儲存");
+  }catch(err){
+    console.error("Expense saved, refresh failed:",err);
+    toast("使用紀錄已儲存，但清單更新失敗。請重新整理確認，不需重複新增。",8000);
+  }
+});
 $("newCategoryBtn").addEventListener("click", openNewCategory);
 $("recordForm").addEventListener("submit", saveRecord);
 $("categoryForm").addEventListener("submit", saveCategory);
@@ -135,7 +147,7 @@ onAuthStateChanged(auth, async user=>{
     renderAll();
   }catch(e){
     console.error(e);
-    toast("讀取系統資料失敗，請檢查 Firestore Rules。",5000);
+    toast(`讀取系統資料失敗：${e?.code||e?.message||"請稍後再試"}`,8000);
   }
 });
 
