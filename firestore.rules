@@ -478,6 +478,17 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+      // Manager corrections do not change the owner, evidence, or review lifecycle.
+      allow update: if manager()
+        && resource.data.get('deleted', false) == false && !recordLocked()
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && validExpenseNumbers(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy'
+        ])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount'])
+          || (!linked(resource.data) && request.resource.data.amount is number && request.resource.data.amount >= 0));
+
       allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
         && !recordLocked() && resource.data.get('deleted', false) == false
         && validExpenseNumbers(request.resource.data)
