@@ -137,7 +137,7 @@ async function saveRequestedRecord(){
       if(!linked && amount!==displayedAmount)patch.amount=amount;
       await updateDoc(doc(c.db,"expenseRecords",id),patch);
       document.getElementById("recordDialog")?.close();
-      window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId}}));
+      window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId,recordId:id}}));
       return;
     }
   }
@@ -179,11 +179,12 @@ async function saveRequestedRecord(){
   };
 
   // Preserve any existing manager-waiver fields on edit; teacher-side request must never create/change them.
+  let savedId=id;
   if(id) await updateDoc(doc(c.db,"expenseRecords",id),data);
-  else await addDoc(collection(c.db,"expenseRecords"),{...data,createdBy:email,createdAt:serverTimestamp()});
+  else savedId=(await addDoc(collection(c.db,"expenseRecords"),{...data,createdBy:email,createdAt:serverTimestamp()})).id;
 
   document.getElementById("recordDialog")?.close();
-  window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId}}));
+  window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId,recordId:savedId}}));
 }
 
 async function approveConfirmedWaiver(id){
