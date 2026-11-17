@@ -94,7 +94,7 @@ async function saveRequestedRecord(){
   if(!categoryId) throw new Error("請選擇經費項目");
   if(!purpose) throw new Error("請填寫用途／摘要");
   if(!/^\d{3}-[12]$/.test(semester)) throw new Error("學期請輸入例如 114-2、115-1");
-  if(amount<0) throw new Error("金額不可小於 0");
+  if(!Number.isFinite(amount)||amount<0) throw new Error("請輸入有效的非負金額");
   if(file) throw new Error("已勾選「此單無需附上單據」，請不要另外選擇附件");
 
   const [userSnap,existingSnap]=await Promise.all([
@@ -119,18 +119,31 @@ async function saveRequestedRecord(){
     if(value.length>80)throw new Error("單號不能超過 80 個字");
     if(value!==String(existing?.[key]||""))numberChanges[key]=value;
   }
-  if(existing?.voucherNotRequiredRequested===true && Object.keys(numberChanges).length
-    && planId===existing.planId && categoryId===existing.categoryId && semester===existing.semester
-    && purpose===String(existing.purpose||"").trim() && note===String(existing.note||"").trim()
-    && amount===Number(existing.amount||0)+(existing.advanceAllocationId?Number(existing.advanceTopUpTotal||0):0)
-    && (document.getElementById("recordHanlongAdvance")?.checked===true)===(existing.hanlongAdvance===true)
-    && (!isManager || !document.getElementById("recordOwner")?.value
-      || document.getElementById("recordOwner").value===(existing.accountingOwnerEmail||existing.ownerEmail))){
-    await updateDoc(doc(c.db,"expenseRecords",id),{...numberChanges,updatedAt:serverTimestamp(),updatedBy:email});
-    document.getElementById("recordDialog")?.close();
-    window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId}}));
-    return;
+  const ownerSelection=document.getElementById("recordOwner")?.value;
+  if(existing?.voucherNotRequiredRequested===true && isManager
+    && ownerSelection && ownerSelection!==(existing.accountingOwnerEmail||existing.ownerEmail))
+    throw new Error("請先使用「變更負責老師」儲存負責老師。");
+  if(existing?.voucherNotRequiredRequested===true && planId===existing.planId
+    && categoryId===existing.categoryId && semester===existing.semester
+    && (document.getElementById("recordHanlongAdvance")?.checked===true)===(existing.hanlongAdvance===true)){
+    const linked=!!existing.advanceAllocationId;
+    const displayedAmount=Number(existing.amount||0)+(linked?Number(existing.advanceTopUpTotal||0):0);
+    if(linked && amount!==displayedAmount)throw new Error("預支已連結，請在預支流程調整金額。");
+    const sameDetails=purpose===String(existing.purpose||"").trim() && note===String(existing.note||"").trim() && amount===displayedAmount;
+    if(isManager || sameDetails){
+      const patch={...numberChanges,updatedAt:serverTimestamp(),updatedBy:email};
+      if(purpose!==String(existing.purpose||"").trim())patch.purpose=purpose;
+      if(note!==String(existing.note||"").trim())patch.note=note;
+      if(!linked && amount!==displayedAmount)patch.amount=amount;
+      await updateDoc(doc(c.db,"expenseRecords",id),patch);
+      document.getElementById("recordDialog")?.close();
+      window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId}}));
+      return;
+    }
   }
+  if(existing?.advanceAllocationId && (amount!==Number(existing.amount||0)+Number(existing.advanceTopUpTotal||0)
+      || categoryId!==existing.categoryId || semester!==existing.semester || planId!==existing.planId))
+    throw new Error("此紀錄已連結預支，不能直接變更金額、經費項目或學期。");
 
   const [planSnap,catSnap,recordsSnap]=await Promise.all([
     getDoc(doc(c.db,"budgetPlans",planId)),
@@ -152,7 +165,7 @@ async function saveRequestedRecord(){
   if(used+amount>Number(cat.budget||0)) throw new Error(`此筆會超過「${cat.name||"此經費項目"}」編列額度`);
 
   const data={
-    planId,categoryId,purpose,amount,semester,estimated:false,
+    planId,categoryId,purpose,amount:existing?.advanceAllocationId?existing.amount:amount,semester,estimated:false,
     archived:false,amountConfirmed:false,
     voucherNotRequiredRequested:true,
     voucherNotRequiredRequestedAt:serverTimestamp(),
