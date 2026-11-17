@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, updateDoc, deleteDoc, query, orderBy, where, limit, startAfter, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCsApWkpnJiwCsQsiPK14pgFQdqb88UJjQ",
@@ -1230,3 +1230,63 @@ $('budgetHistoryBtn').onclick=async()=>{
   }catch(err){$('adjustmentBody').textContent='讀取失敗：'+err.message;}
 };
 
+
+const opLogDays=30*24*60*60*1000;
+const opLogPage=100;
+let opLogCursor=null,opLogBusy=false;
+const opLogTime=new Intl.DateTimeFormat("zh-TW",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"});
+const opLogTimeText=data=>data.occurredAt?.toDate?opLogTime.format(data.occurredAt.toDate()):"—";
+const opLogActor=data=>data.actorEmail?budgetUserName(data.actorEmail,data.actorEmail):data.actorId||"未取得身分";
+const opLogPeriod=()=>new Date(Date.now()-opLogDays);
+async function opLogFetch(cutoff,cursor){
+  return getDocsFromServer(query(collection(db,"budgetOperationLogs"),where("occurredAt",">=",cutoff),orderBy("occurredAt","desc"),...(cursor?[startAfter(cursor)]:[]),limit(opLogPage)));
+}
+async function runOpLog(mode){
+  if(opLogBusy||!isManager()||!state.user?.uid)return;
+  const uid=state.user.uid,valid=()=>isManager()&&uid===state.user?.uid&&uid===auth.currentUser?.uid;
+  const body=$("operationLogRows"),status=$("operationLogStatus"),more=$("operationLogMore"),refresh=$("operationLogRefresh"),download=$("operationLogExcel");
+  opLogBusy=true; for(const b of [more,refresh,download])b.disabled=true;
+  status.textContent=mode==="excel"?"準備 Excel…":"讀取操作紀錄…";
+  try{
+    const cutoff=opLogPeriod();
+    if(mode==="excel"){
+      if(!window.ExcelJS)throw Error("Excel 功能尚未載入");
+      const wb=new ExcelJS.Workbook(),sheet=wb.addWorksheet("操作紀錄");
+      sheet.columns=[{header:"時間（台灣）",width:26},{header:"操作人",width:22},{header:"帳號／身分識別",width:32},{header:"操作",width:24},{header:"紀錄",width:42},{header:"紀錄 ID",width:30},{header:"計畫 ID",width:30}];
+      sheet.getRow(1).font={bold:true};sheet.views=[{state:"frozen",ySplit:1}];
+      let cursor=null;
+      do{
+        if(!valid())return;
+        const page=await opLogFetch(cutoff,cursor);
+        if(!valid())return;
+        for(const item of page.docs){const d=item.data();sheet.addRow([opLogTimeText(d),opLogActor(d),d.actorEmail||d.actorId||"",d.action||"",d.label||"",d.recordId||"",d.planId||""]);}
+        cursor=page.size===opLogPage?page.docs.at(-1):null;
+      }while(cursor);
+      const bytes=await wb.xlsx.writeBuffer();
+      if(!valid())return;
+      const url=URL.createObjectURL(new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+      const link=document.createElement("a");link.href=url;link.download="經費操作紀錄-最近30天.xlsx";link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+      status.textContent="已匯出 "+(sheet.rowCount-1)+" 筆";
+      return;
+    }
+    const page=await opLogFetch(cutoff,mode==="more"?opLogCursor:null);
+    if(!valid())return;
+    if(mode!=="more")body.replaceChildren();
+    for(const item of page.docs){
+      const d=item.data(),row=body.insertRow();
+      for(const val of [opLogTimeText(d),opLogActor(d),d.action||"",d.label||d.recordId||""])row.insertCell().textContent=val;
+    }
+    opLogCursor=page.size===opLogPage?page.docs.at(-1):null;
+    more.hidden=!opLogCursor;
+    status.textContent=body.rows.length?"已載入 "+body.rows.length+" 筆":"最近 30 天沒有操作紀錄。";
+  }catch(err){if(valid())status.textContent="讀取失敗："+(err?.message||err);}
+  finally{opLogBusy=false;for(const b of [more,refresh,download])b.disabled=false;}
+}
+$("operationLogBtn")?.addEventListener("click",()=>{
+  if(!isManager())return;
+  $("operationLogRows").replaceChildren();$("operationLogMore").hidden=true;opLogCursor=null;
+  $("operationLogDialog").showModal();void runOpLog("first");
+});
+$("operationLogRefresh")?.addEventListener("click",()=>runOpLog("first"));
+$("operationLogMore")?.addEventListener("click",()=>runOpLog("more"));
+$("operationLogExcel")?.addEventListener("click",()=>runOpLog("excel"));
