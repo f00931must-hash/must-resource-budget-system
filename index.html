@@ -50,7 +50,7 @@
     </div>
     <div id="inactivePlanNotice" class="inactive-plan hidden">此計畫已停用：不可新增使用紀錄或新增經費項目；既有資料仍可查看與依權限修改。</div>
 
-    <nav class="tabs"><button class="tab active" data-view="dashboard">總覽</button><button class="tab" data-view="records">使用紀錄</button><button class="tab manager-only" data-view="budget">經費編列</button><button id="operationLogBtn" type="button" class="ghost-btn manager-only hidden">操作紀錄</button></nav>
+    <nav class="tabs"><button class="tab active" data-view="dashboard">總覽</button><button class="tab" data-view="records">使用紀錄</button><button class="tab manager-only" data-view="budget">經費編列</button></nav>
 
     <main>
       <section id="dashboard" class="view active-view">
@@ -175,19 +175,6 @@
   <script type="module" src="./budget-estimate-stage-v165.js?v=1.6.8"></script>
   <script type="module" src="./budget-reminder-email-v168.js?v=1.6.8"></script>
   <script type="module" src="./budget-submit-guard-v169.js?v=1.6.9"></script>
-<dialog id="operationLogDialog" style="width:min(900px,95vw)">
-  <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-    <h2>操作紀錄｜最近 30 天</h2><button type="button" class="ghost-btn" data-close="operationLogDialog">關閉</button>
-  </div>
-  <p class="hint">時間顯示為台灣時間。只記錄啟用後成功寫入的操作。</p>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button id="operationLogRefresh" class="ghost-btn" type="button">重新讀取</button>
-    <button id="operationLogMore" class="ghost-btn" type="button" hidden>載入更多</button>
-    <button id="operationLogExcel" class="primary-btn" type="button">下載 30 天 Excel</button>
-  </div>
-  <p id="operationLogStatus" role="status"></p>
-  <div style="overflow:auto;max-height:55vh"><table style="width:100%;text-align:left"><thead><tr><th>時間</th><th>操作人</th><th>動作</th><th>紀錄</th></tr></thead><tbody id="operationLogRows"></tbody></table></div>
-</dialog>
 </body>
 </html>
 
