@@ -1,0 +1,11 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "budget-operation-log"
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}
