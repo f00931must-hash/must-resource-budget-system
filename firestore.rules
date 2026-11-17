@@ -111,6 +111,13 @@ service cloud.firestore {
         && request.resource.data.amount==a.estimatedAmount-b.splitRefundTotal
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount','updatedAt','updatedBy']);
     }
+    function splitBatchHandler(payout) {
+      let batch = get(/databases/$(database)/documents/advanceBatches/$(payout.batchId)).data;
+      let handler = batch.get('handlerEmail', '');
+      return handler != '' && handler != null ? handler
+        : get(/databases/$(database)/documents/advanceAllocations/$(payout.allocationId)).data.ownerEmail;
+    }
+
     match /advancePayouts/{payoutId} {
       allow read: if manager() || (enabledUser() && resource.data.ownerEmail==email())
         || (advanceOfficer() && resource.data.handlerEmail==email());
@@ -124,7 +131,7 @@ service cloud.firestore {
         && request.resource.data.planId==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.planId
         && request.resource.data.batchId==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.batchId
         && request.resource.data.expenseRecordId==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.expenseRecordId
-        && request.resource.data.handlerEmail==get(/databases/$(database)/documents/advanceBatches/$(request.resource.data.batchId)).data.handlerEmail
+        && request.resource.data.handlerEmail==splitBatchHandler(request.resource.data)
         && payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data)
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.splitMutationId==payoutId
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.splitAssigned==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.get('splitAssigned',0)+request.resource.data.amount;
@@ -286,7 +293,12 @@ service cloud.firestore {
         && request.resource.data.refundReported == true
         && request.resource.data.refundReportedBy == email()
         && request.resource.data.refundReportedAt == request.time
-        && refundOwed()
+        && resource.data.get('allocationReceivedConfirmed', false) == true
+        && resource.data.get('deleted', false) == false
+        && resource.data.get('payoutSplit', false) == false
+        && request.resource.data.refundAmount is int
+        && request.resource.data.refundAmount <= resource.data.estimatedAmount
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'refundReported','refundAmount','refundReportedBy','refundReportedAt','refundReceivedConfirmed','refundConfirmedTotal','updatedAt','updatedBy'
         ]);
@@ -478,8 +490,22 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
-      // Manager corrections do not change the owner, evidence, or review lifecycle.
-      allow update: if manager()
+      // Remove the attachment reference only; a teacher cannot purge storage files.
+      allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
+        && !recordLocked() && resource.data.get('deleted', false) == false
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && request.resource.data.voucherUrl == '' && request.resource.data.folderUrl == ''
+        && request.resource.data.voucherPath == '' && request.resource.data.voucherStoragePath == ''
+        && request.resource.data.voucherFileName == '' && request.resource.data.voucherFileType == ''
+        && request.resource.data.voucherFileSize == 0 && request.resource.data.archived == false
+        && request.resource.data.amountConfirmed == false && request.resource.data.amountManuallyConfirmed == false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'voucherUrl','folderUrl','voucherPath','voucherStoragePath','voucherFileName',
+          'voucherFileType','voucherFileSize','archived','amountConfirmed','amountManuallyConfirmed','updatedAt','updatedBy'
+        ]);
+
+      // Corrections leave the owner, evidence, and review lifecycle intact.
+      allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
         && resource.data.get('deleted', false) == false && !recordLocked()
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && validExpenseNumbers(request.resource.data)
