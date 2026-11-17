@@ -562,7 +562,11 @@ async function confirmOwnReceipt(id,button){
   button.disabled=true;
   try{
     await updateDoc(doc(db,"advanceAllocations",id),{allocationReceivedConfirmed:true,allocationReceivedAt:serverTimestamp(),allocationReceivedBy:email,updatedAt:serverTimestamp(),updatedBy:email});
-    await loadAll();
+    try{
+      const snap=await getDoc(doc(db,"advanceAllocations",id));
+      if(!snap.exists())throw Error("找不到最新分配");
+      if(snap.data().planId===planId()){allocations=allocations.map(a=>a.id===id?{id,...snap.data()}:a);render();}
+    }catch(err){button.disabled=false;alert("已確認領款，但畫面未更新，請重新整理。");}
   }catch(err){button.disabled=false;showError(err);}
 }
 
