@@ -539,7 +539,7 @@ function render(){
       <div><small>原預估</small><strong>${money.format(a.estimatedAmount)}</strong></div>
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small>${settlementMarkup(a,r,true)}</div>
-      <div>${!a.payoutSplit&&!receiptConfirmed&&String(a.ownerEmail||"").toLowerCase()===currentEmail?`<button class="primary-btn" data-manager-own-receipt="${a.id}">確認收到分配金額</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
+      <div>${!a.payoutSplit&&!receiptConfirmed&&(!ownOnly||String(a.ownerEmail||"").toLowerCase()===currentEmail)?`<button class="primary-btn" data-manager-own-receipt="${a.id}">${String(a.ownerEmail||"").toLowerCase()===currentEmail?"確認收到分配金額":"代登已領款"}</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
       <div><small>追加預支</small> <strong>${money.format(a.advanceTopUpTotal||0)}</strong> ・ 含追加合計 ${money.format(num(a.estimatedAmount)+num(a.advanceTopUpTotal))}
       ${!ownOnly&&r?'<button type="button" class="link-btn" data-advance-topup="'+escAttr(a.id)+'">登記追加預支</button>':""}</div>
       ${splitMarkup(a,splitPayouts)}
@@ -555,8 +555,10 @@ function render(){
 async function confirmOwnReceipt(id,button){
   const item=allocations.find(a=>a.id===id);
   const email=auth?.currentUser?.email?.toLowerCase()||"";
-  if(!item||!email||String(item.ownerEmail||"").toLowerCase()!==email||item.allocationReceivedConfirmed===true)return;
-  if(!confirm(`確認已收到「${item.purpose||"此筆分配"}」的分配金額 ${money.format(item.estimatedAmount||0)}？`))return;
+  if(!item||!email||item.deleted||item.payoutSplit||item.allocationReceivedConfirmed===true)return;
+  const isOwn=String(item.ownerEmail||"").toLowerCase()===email;
+  if(ownOnly&&!isOwn)return;
+  if(!confirm(`${isOwn?"確認本人":"確認代登 "+(item.ownerName||item.ownerEmail)} 已收到「${item.purpose||"此筆分配"}」的分配金額 ${money.format(item.estimatedAmount||0)}？`))return;
   button.disabled=true;
   try{
     await updateDoc(doc(db,"advanceAllocations",id),{allocationReceivedConfirmed:true,allocationReceivedAt:serverTimestamp(),allocationReceivedBy:email,updatedAt:serverTimestamp(),updatedBy:email});
