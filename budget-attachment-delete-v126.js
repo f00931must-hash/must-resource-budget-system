@@ -1,6 +1,6 @@
 import { getApps, getApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, getDocs, updateDoc, addDoc, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, getDocFromServer, getDocs, updateDoc, addDoc, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const WORKER_URL = "https://must-free-upload-service.f00931-must.workers.dev";
 
@@ -75,9 +75,8 @@ function patchPlanClearButton(){
   if(!manager) return;
   const btn=document.getElementById("purgePlanAttachmentsBtn");
   if(!btn) return;
-  const count=cache.records.filter(r=>!r.voucherPurged&&!!recordPath(r)).length;
-  btn.disabled=count===0;
-  btn.title=count?`此計畫共有 ${count} 份附件可清理（不刪除使用紀錄）`:"此計畫目前沒有可清理的附件";
+  btn.disabled=!document.getElementById("planSelect")?.value;
+  btn.title="按下後檢查此計畫可清理的附件";
   btn.onclick=clearPlanAttachments;
 }
 
@@ -86,8 +85,7 @@ function patchIndividualButtons(){
   document.querySelectorAll("#recordList .record-card").forEach(card=>{
     const id=findRecordId(card);
     if(!id) return;
-    const r=cache.records.find(x=>x.id===id);
-    if(!r||r.voucherPurged||!recordPath(r)) return;
+    if(card.dataset.purgeableVoucher!=="true") return;
     const actions=card.querySelector(".record-actions");
     if(!actions||actions.querySelector(`[data-delete-voucher="${id}"]`)) return;
     const b=document.createElement("button");
@@ -121,12 +119,14 @@ async function markPurged(r,path,action){
 
 async function deleteSingleAttachment(id){
   if(!manager) return;
-  const r=cache.records.find(x=>x.id===id);
-  if(!r) return;
+  try{
+  const snap=await getDocFromServer(doc(db,"expenseRecords",id));
+  if(!snap.exists())return alert("找不到這筆紀錄。");
+  const r={id:snap.id,...snap.data()};
+  if(r.deleted||r.voucherPurged||r.planId!==document.getElementById("planSelect")?.value)return alert("紀錄已變更，請重新整理後確認。");
   const path=recordPath(r);
   if(!path) return alert("這筆目前沒有可刪除的附件。");
   if(!confirm(`確定只刪除「${r.purpose||"此筆紀錄"}」的核銷附件嗎？\n\n${r.voucherFileName||"附件"}\n\n使用紀錄與金額都會保留，附件刪除後無法復原。`)) return;
-  try{
     await workerRequest("/delete",{
       method:"POST",
       headers:{"content-type":"application/json"},
@@ -134,10 +134,10 @@ async function deleteSingleAttachment(id){
     });
     await markPurged(r,path,"single");
     await addDoc(collection(db,"auditLogs"),{
-      type:"expense-voucher-purge",targetId:id,planId:cache.planId,action:"purge-single-voucher",
+      type:"expense-voucher-purge",targetId:id,planId:r.planId,action:"purge-single-voucher",
       actorEmail:(user.email||"").toLowerCase(),originalPath:path,createdAt:serverTimestamp()
     }).catch(()=>{});
-    await refreshAndPatch();
+    window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId:r.planId}}));
     alert("附件已刪除，使用紀錄仍保留。");
   }catch(err){
     alert("刪除附件失敗："+(err?.message||err));
@@ -145,7 +145,10 @@ async function deleteSingleAttachment(id){
 }
 
 async function clearPlanAttachments(){
-  if(!manager||!cache.planId) return;
+  if(!manager)return;
+  try{await loadCache();}catch(err){return alert("讀取附件清單失敗："+(err?.message||err));}
+  if(!cache.planId||cache.planId!==document.getElementById("planSelect")?.value)return;
+  const bulkPlanId=cache.planId;
   const rows=cache.records.filter(r=>!r.voucherPurged&&!!recordPath(r));
   if(!rows.length) return alert("此計畫目前沒有可清理的附件。");
   const planName=cache.plan?.name||"此計畫";
@@ -174,18 +177,17 @@ async function clearPlanAttachments(){
     }
   }
   await addDoc(collection(db,"auditLogs"),{
-    type:"plan-attachment-purge",targetId:cache.planId,planId:cache.planId,action:"purge-plan-attachments",
+    type:"plan-attachment-purge",targetId:bulkPlanId,planId:bulkPlanId,action:"purge-plan-attachments",
     deletedCount:ok,failedCount:fail,actorEmail:(user.email||"").toLowerCase(),createdAt:serverTimestamp()
   }).catch(()=>{});
   if(btn) btn.textContent="清除此計畫附件";
-  await refreshAndPatch();
+  window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId:bulkPlanId}}));
   alert(`附件清理完成。\n\n成功：${ok} 份\n失敗：${fail} 份\n\n所有使用紀錄仍保留。`);
 }
 
 async function refreshAndPatch(){
   if(!user||!manager) return;
   try{
-    await loadCache();
     patchPlanClearButton();
     patchIndividualButtons();
   }catch(err){
