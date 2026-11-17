@@ -423,7 +423,8 @@ function renderRecords(){
     if(canEdit && !isManager() && evidenceUrl) actions+=`<button class="link-btn danger" data-detach-voucher="${escAttr(r.id)}">移除附件</button>`;
     if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;
     if(isManager() && approved) actions+=`<button class="link-btn unlock" data-unlock-record="${r.id}">解鎖</button>`;
-    return `<article class="record-card ${approved?'locked':''}">
+    const canPurgeVoucher=isManager()&&!r.voucherPurged&&!!(r.voucherPath||r.voucherStoragePath||githubPathFromUrl(evidenceUrl));
+    return `<article class="record-card ${approved?'locked':''}"${canPurgeVoucher?' data-purgeable-voucher="true"':''}>
       <div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(responsibleExpenseName(r))}</small></div>
       <div><strong>${money.format(accountingAmount(r))}</strong><small>學期：${esc(r.semester||"未填")}</small></div>
       <div>${statusBadge}${issues}</div>
