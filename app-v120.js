@@ -41,8 +41,8 @@ window.addEventListener("budget-expense-saved",async event=>{
   const planId=event.detail?.planId;
   if(!state.user||planId!==state.activePlanId)return;
   try{
-    await loadPlanData();
-    renderAll();
+    if(event.detail?.recordId) await refreshOneExpense(event.detail.recordId,planId);
+    else { await loadPlanData(); renderAll(); }
     toast("使用紀錄已儲存");
   }catch(err){
     console.error("Expense saved, refresh failed:",err);
@@ -212,6 +212,29 @@ async function loadPlans(){
   if(!state.activePlanId || !state.plans.some(p=>p.id===state.activePlanId)){
     state.activePlanId=state.plans.find(p=>p.active!==false)?.id || state.plans[0]?.id || "";
   }
+}
+
+function shareExpenseReviewView(){
+  if(!isManager())return;
+  const keys=["id","deleted","estimated","reviewed","locked","reviewStatus","voucherPurged","voucherWaiverManagerConfirmed","amountConfirmedByManagerWaiver","amountConfirmed","amountManuallyConfirmed"];
+  const records=state.records.filter(r=>r.planId===state.activePlanId).map(r=>({
+    ...Object.fromEntries(keys.map(k=>[k,r[k]])),voucherUrl:!!(r.voucherUrl||r.folderUrl)
+  }));
+  window.dispatchEvent(new CustomEvent("budget-expense-review-view",{detail:{planId:state.activePlanId,records}}));
+}
+window.addEventListener("budget-expense-review-request",shareExpenseReviewView);
+async function refreshOneExpense(id,planId){
+  const uid=state.user?.uid;
+  const snap=await getDocFromServer(doc(db,"expenseRecords",id));
+  if(!uid||state.user?.uid!==uid||state.activePlanId!==planId)return;
+  const data=snap.exists()?snap.data():null;
+  if(!data||data.deleted||data.planId!==planId) state.records=state.records.filter(r=>r.id!==id);
+  else {
+    const i=state.records.findIndex(r=>r.id===id);
+    if(i<0)state.records.push({id,...data}); else state.records[i]={id,...data};
+  }
+  renderDashboard(); renderSemesterOptions(); renderTeacherOptions(); renderRecords();
+  if(isManager())renderCategoryAdmin();
 }
 
 async function loadPlanData(){
@@ -399,6 +422,7 @@ function filteredRecords(){
 }
 
 function renderRecords(){
+  shareExpenseReviewView();
   const rows=filteredRecords();
   $("batchDownloadBtn").classList.toggle("hidden",!isManager());
   $("batchDownloadBtn").disabled=!rows.some(r=>r.voucherUrl||r.folderUrl);
@@ -670,6 +694,7 @@ async function saveRecord(e){
     if(!$("recordArchived").checked)return toast("請先勾選「我已上傳核銷單據」");
     if(!$("recordAmountConfirm").checked)return toast("請先確認核銷單據是否與 Key 的金額相同",5000);
   }
+  const savedPlanId=state.activePlanId;
   let uploaded=null, recordSaved=false, saveStep="附件上傳"; const oldPath=existing?.voucherPath||existing?.voucherStoragePath||githubPathFromUrl(oldUrl);
   try{
     if(file){ $("recordSaveBtn").disabled=true; $("recordSaveBtn").textContent="附件上傳中…"; uploaded=await uploadVoucherFile(file); }
@@ -693,11 +718,13 @@ async function saveRecord(e){
       if(managerCorrection && data.note!==String(existing.note||"").trim()) correction.note=data.note;
       await updateDoc(doc(db,"expenseRecords",id),correction);
       recordSaved=true;
-      $("recordDialog").close(); await loadPlanData(); renderAll(); toast(amountOnly?"金額已更新":numberOnly?"單號已更新":"使用紀錄已更新");
+      $("recordDialog").close(); await refreshOneExpense(id,savedPlanId); toast(amountOnly?"金額已更新":numberOnly?"單號已更新":"使用紀錄已更新");
       return;
     }
     Object.assign(data,numberChanges);
-    if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); } else await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()});
+    let savedId=id;
+    if(id){ delete data.createdBy; await updateDoc(doc(db,"expenseRecords",id),data); }
+    else savedId=(await addDoc(collection(db,"expenseRecords"),{...data,createdAt:serverTimestamp()})).id;
     recordSaved=true;
     saveStep="畫面更新";
     if(isManager()&&existing&&String(existing.ownerEmail||"").toLowerCase()!==recordOwner.email){
@@ -709,7 +736,7 @@ async function saveRecord(e){
       });
     }
     if(file&&oldPath&&oldPath!==uploaded.path)await githubDeleteFile(oldPath,existing?.voucherFileName||"voucher").catch(()=>{});
-    $("recordDialog").close(); await loadPlanData(); renderAll(); toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");
+    $("recordDialog").close(); await refreshOneExpense(savedId,savedPlanId); toast(estimated?"預估紀錄已儲存":"已送出，等待管理員核對");
   }catch(err){
     console.error(err);
     if(!recordSaved&&uploaded?.path&&uploaded.path!==oldPath)await githubDeleteFile(uploaded.path,uploaded.name).catch(()=>{});
