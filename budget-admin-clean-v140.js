@@ -4,11 +4,11 @@
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, getDocs, updateDoc, addDoc, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, updateDoc, addDoc, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID="must-resource-budget-system";
 let auth=null, db=null, manager=false, records=[];
-let timer=null, refreshInFlight=false, refreshQueued=false;
+let timer=null;
 let lastCardSignature="";
 
 function app(){ return getApps().find(a=>a.options?.projectId===PROJECT_ID)||null; }
@@ -75,29 +75,20 @@ function patchTodoCounts(){
   const missingConfirm=valid.filter(r=>r.estimated!==true && !managerConfirmed(r) && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true).length;
   document.querySelectorAll("[data-quick-issue]").forEach(btn=>{
     const strong=btn.querySelector("strong"); if(!strong) return;
-    if(btn.dataset.quickIssue==="missingVoucher") strong.textContent=String(missingVoucher);
-    if(btn.dataset.quickIssue==="unconfirmed") strong.textContent=String(missingConfirm);
+    const count=btn.dataset.quickIssue==="missingVoucher"?missingVoucher:btn.dataset.quickIssue==="unconfirmed"?missingConfirm:null;
+    if(count!==null&&strong.textContent!==String(count))strong.textContent=String(count);
   });
 }
 function patchVisuals(){ patchCards(); patchTodoCounts(); }
 
-async function refresh(){
-  if(!manager || !db) return;
-  if(refreshInFlight){ refreshQueued=true; return; }
-  const planId=document.getElementById("planSelect")?.value||"";
-  if(!planId){ records=[]; patchVisuals(); return; }
-  refreshInFlight=true;
-  try{
-    const snap=await getDocs(query(collection(db,"expenseRecords"),where("planId","==",planId)));
-    records=snap.docs.map(d=>({id:d.id,...d.data()}));
-    patchVisuals();
-    lastCardSignature=cardSignature();
-  }catch(err){ console.warn("budget admin unified refresh failed",err); }
-  finally{
-    refreshInFlight=false;
-    if(refreshQueued){ refreshQueued=false; schedule(180); }
-  }
+function refresh(){
+  if(manager)window.dispatchEvent(new Event("budget-expense-review-request"));
 }
+window.addEventListener("budget-expense-review-view",event=>{
+  if(!manager||event.detail?.planId!==(document.getElementById("planSelect")?.value||""))return;
+  records=event.detail.records;
+  setTimeout(()=>{patchVisuals();lastCardSignature=cardSignature();},0);
+});
 function schedule(ms=120){ clearTimeout(timer); timer=setTimeout(refresh,ms); }
 
 async function verifyManagerAndRecord(id){
