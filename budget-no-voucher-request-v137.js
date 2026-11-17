@@ -128,7 +128,7 @@ async function saveRequestedRecord(){
       || document.getElementById("recordOwner").value===(existing.accountingOwnerEmail||existing.ownerEmail))){
     await updateDoc(doc(c.db,"expenseRecords",id),{...numberChanges,updatedAt:serverTimestamp(),updatedBy:email});
     document.getElementById("recordDialog")?.close();
-    location.reload();
+    window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId}}));
     return;
   }
 
@@ -170,7 +170,7 @@ async function saveRequestedRecord(){
   else await addDoc(collection(c.db,"expenseRecords"),{...data,createdBy:email,createdAt:serverTimestamp()});
 
   document.getElementById("recordDialog")?.close();
-  location.reload();
+  window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId}}));
 }
 
 async function approveConfirmedWaiver(id){
