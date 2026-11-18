@@ -490,6 +490,10 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+      // Route linking before unrelated edit/review checks to stay within the evaluation limit.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceAllocationId'])
+        && enabledUser() && linkExistingEstimate(recordId);
+
       // Remove the attachment reference only; a teacher cannot purge storage files.
       allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
         && !recordLocked() && resource.data.get('deleted', false) == false
@@ -612,7 +616,7 @@ service cloud.firestore {
           'deleted','deletedAt','deletedBy','updatedAt','updatedBy'
         ]);
 
-      allow update: if enabledUser() && linkExistingEstimate(recordId);
+
 
       // Confirm an actual refund and synchronize only the linked expense balance.
       allow update: if enabledUser()
