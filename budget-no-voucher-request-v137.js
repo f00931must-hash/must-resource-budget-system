@@ -5,7 +5,7 @@
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, getDocs, addDoc, updateDoc, collection, query, where, serverTimestamp
+  getFirestore, doc, getDoc, addDoc, updateDoc, collection, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID = "must-resource-budget-system";
@@ -76,6 +76,8 @@ async function loadRequestForDialog(){
 }
 
 async function saveRequestedRecord(){
+  let phase="檢查表單與帳號";
+  try{
   const c=ctx(); if(!c) throw new Error("Firebase 尚未初始化");
   const user=c.auth.currentUser; if(!user) throw new Error("尚未登入");
   const email=(user.email||"").toLowerCase();
@@ -97,6 +99,7 @@ async function saveRequestedRecord(){
   if(!Number.isFinite(amount)||amount<0) throw new Error("請輸入有效的非負金額");
   if(file) throw new Error("已勾選「此單無需附上單據」，請不要另外選擇附件");
 
+  phase="讀取帳號與使用紀錄";
   const [userSnap,existingSnap]=await Promise.all([
     getDoc(doc(c.db,"users",email)),
     id?getDoc(doc(c.db,"expenseRecords",id)):Promise.resolve(null)
@@ -135,6 +138,7 @@ async function saveRequestedRecord(){
       if(purpose!==String(existing.purpose||"").trim())patch.purpose=purpose;
       if(note!==String(existing.note||"").trim())patch.note=note;
       if(!linked && amount!==displayedAmount)patch.amount=amount;
+      phase="儲存免附單據紀錄修改";
       await updateDoc(doc(c.db,"expenseRecords",id),patch);
       document.getElementById("recordDialog")?.close();
       window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId,recordId:id}}));
@@ -145,10 +149,10 @@ async function saveRequestedRecord(){
       || categoryId!==existing.categoryId || semester!==existing.semester || planId!==existing.planId))
     throw new Error("此紀錄已連結預支，不能直接變更金額、經費項目或學期。");
 
-  const [planSnap,catSnap,recordsSnap]=await Promise.all([
+  phase="讀取計畫與經費項目";
+  const [planSnap,catSnap]=await Promise.all([
     getDoc(doc(c.db,"budgetPlans",planId)),
-    getDoc(doc(c.db,"budgetCategories",categoryId)),
-    getDocs(query(collection(c.db,"expenseRecords"),where("planId","==",planId)))
+    getDoc(doc(c.db,"budgetCategories",categoryId))
   ]);
   if(!planSnap.exists()) throw new Error("找不到目前計畫");
   if(!id && planSnap.data().active===false) throw new Error("此計畫已停用，無法新增使用紀錄");
@@ -158,14 +162,9 @@ async function saveRequestedRecord(){
 
   if(existing?.voucherUrl||existing?.folderUrl) throw new Error("此筆已有附件，不需再申報免附單據");
 
-  const used=recordsSnap.docs
-    .map(d=>({id:d.id,...d.data()}))
-    .filter(r=>r.deleted!==true && r.categoryId===categoryId && r.id!==id)
-    .reduce((s,r)=>s+Number(r.amount||0),0);
-  if(used+amount>Number(cat.budget||0)) throw new Error(`此筆會超過「${cat.name||"此經費項目"}」編列額度`);
-
   const data={
     planId,categoryId,purpose,amount:existing?.advanceAllocationId?existing.amount:amount,semester,estimated:false,
+    estimateStage:"",hanlongAdvance:document.getElementById("recordHanlongAdvance")?.checked===true,
     archived:false,amountConfirmed:false,
     voucherNotRequiredRequested:true,
     voucherNotRequiredRequestedAt:serverTimestamp(),
@@ -180,11 +179,15 @@ async function saveRequestedRecord(){
 
   // Preserve any existing manager-waiver fields on edit; teacher-side request must never create/change them.
   let savedId=id;
+  phase=id?"儲存免附單據申請":"新增免附單據申請";
   if(id) await updateDoc(doc(c.db,"expenseRecords",id),data);
   else savedId=(await addDoc(collection(c.db,"expenseRecords"),{...data,createdBy:email,createdAt:serverTimestamp()})).id;
 
   document.getElementById("recordDialog")?.close();
   window.dispatchEvent(new CustomEvent("budget-expense-saved",{detail:{planId,recordId:savedId}}));
+  }catch(err){
+    throw new Error(`免附單據 ${phase}｜20261118-2：${err?.code?err.code+"：":""}${err?.message||err}`);
+  }
 }
 
 async function approveConfirmedWaiver(id){
