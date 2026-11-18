@@ -490,6 +490,109 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+      // Corrections leave the owner, evidence, and review lifecycle intact.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy'
+        ]) && (manager() || (enabledUser() && resource.data.ownerEmail == email()))
+        && resource.data.get('deleted', false) == false && !recordLocked()
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && validExpenseNumbers(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy'
+        ])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount'])
+          || (!linked(resource.data) && request.resource.data.amount is number && request.resource.data.amount >= 0));
+
+
+      // Managers review or reopen any active expense without changing its owner,
+      // financial fields, voucher, or advance allocation.
+      allow update: if manager()
+        && resource.data.get('deleted', false) == false
+        && resource.data.get('estimated', false) != true
+        && request.resource.data.updatedBy == email()
+        && request.resource.data.updatedAt == request.time
+        && (
+          (
+            !recordLocked()
+            && ((hasVoucher(resource.data) && amountConfirmed(resource.data))
+              || resource.data.get('amountConfirmedByManagerWaiver', false) == true)
+            && request.resource.data.reviewStatus == 'approved'
+            && request.resource.data.reviewed == true
+            && request.resource.data.locked == true
+            && request.resource.data.reviewedAt == request.time
+            && request.resource.data.reviewedBy == email()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reviewStatus','reviewed','locked','reviewedAt','reviewedBy','updatedAt','updatedBy'
+            ])
+          ) || (
+            recordLocked()
+            && request.resource.data.reviewStatus == 'pending'
+            && request.resource.data.reviewed == false
+            && request.resource.data.locked == false
+            && request.resource.data.unlockedAt == request.time
+            && request.resource.data.unlockedBy == email()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reviewStatus','reviewed','locked','unlockedAt','unlockedBy','updatedAt','updatedBy'
+            ])
+          )
+        );
+
+
+
+      // No-voucher requests are submissions, not manager approvals.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['voucherNotRequiredRequestedAt','voucherNotRequiredRequestedBy'])
+        && request.resource.data.get('voucherNotRequiredRequested', false) == true
+        && enabledUser() && (resource.data.ownerEmail == email() || manager())
+        && !recordLocked() && resource.data.get('deleted', false) == false
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && request.resource.data.voucherNotRequiredRequestedBy == email()
+        && request.resource.data.voucherNotRequiredRequestedAt == request.time
+        && request.resource.data.estimated == false
+        && request.resource.data.reviewStatus == 'pending'
+        && request.resource.data.reviewed == false && request.resource.data.locked == false
+        && !hasVoucher(request.resource.data)
+        && request.resource.data.amount is number && request.resource.data.amount >= 0
+        && validExpenseNumbers(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
+          'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
+          'voucherNotRequiredRequested','voucherNotRequiredRequestedAt','voucherNotRequiredRequestedBy',
+          'purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
+        ])
+        && (!linked(resource.data) || (
+          request.resource.data.amount == resource.data.amount
+          && request.resource.data.categoryId == resource.data.categoryId
+          && request.resource.data.semester == resource.data.semester
+        ));
+
+      // Manager waiver confirmation changes only waiver fields, never money or ownership.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'voucherWaiverManagerConfirmed','voucherNotRequired','voucherRequirementWaived','amountConfirmedByManagerWaiver'
+        ])
+        && manager() && resource.data.get('deleted', false) == false
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'voucherWaiverManagerConfirmed','voucherWaiverManagerConfirmedBy','voucherWaiverManagerConfirmedAt',
+          'voucherNotRequired','voucherRequirementWaived','amountConfirmed','amountConfirmedByManagerWaiver','updatedAt','updatedBy'
+        ])
+        && (
+          (!recordLocked() && !hasVoucher(resource.data)
+            && request.resource.data.voucherWaiverManagerConfirmed == true
+            && request.resource.data.voucherWaiverManagerConfirmedBy == email()
+            && request.resource.data.voucherWaiverManagerConfirmedAt == request.time
+            && request.resource.data.voucherNotRequired == true
+            && request.resource.data.voucherRequirementWaived == true
+            && request.resource.data.amountConfirmed == true
+            && request.resource.data.amountConfirmedByManagerWaiver == true)
+          || (request.resource.data.voucherWaiverManagerConfirmed == false
+            && request.resource.data.voucherWaiverManagerConfirmedBy == ''
+            && request.resource.data.voucherWaiverManagerConfirmedAt == null
+            && request.resource.data.voucherNotRequired == false
+            && request.resource.data.voucherRequirementWaived == false
+            && request.resource.data.amountConfirmed == false
+            && request.resource.data.amountConfirmedByManagerWaiver == false)
+        );
+
 
       // Attachment saves must be evaluated before unrelated advance/refund rules.
       // Only the saved owner may use this path; audit and allocation fields stay unchanged.
@@ -545,17 +648,6 @@ service cloud.firestore {
           'voucherFileType','voucherFileSize','archived','amountConfirmed','amountManuallyConfirmed','updatedAt','updatedBy'
         ]);
 
-      // Corrections leave the owner, evidence, and review lifecycle intact.
-      allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
-        && resource.data.get('deleted', false) == false && !recordLocked()
-        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
-        && validExpenseNumbers(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy'
-        ])
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount'])
-          || (!linked(resource.data) && request.resource.data.amount is number && request.resource.data.amount >= 0));
-
       allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
         && !recordLocked() && resource.data.get('deleted', false) == false
         && validExpenseNumbers(request.resource.data)
@@ -563,39 +655,6 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
         ]);
-
-      // Managers review or reopen any active expense without changing its owner,
-      // financial fields, voucher, or advance allocation.
-      allow update: if manager()
-        && resource.data.get('deleted', false) == false
-        && resource.data.get('estimated', false) != true
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && (
-          (
-            !recordLocked()
-            && ((hasVoucher(resource.data) && amountConfirmed(resource.data))
-              || resource.data.get('amountConfirmedByManagerWaiver', false) == true)
-            && request.resource.data.reviewStatus == 'approved'
-            && request.resource.data.reviewed == true
-            && request.resource.data.locked == true
-            && request.resource.data.reviewedAt == request.time
-            && request.resource.data.reviewedBy == email()
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'reviewStatus','reviewed','locked','reviewedAt','reviewedBy','updatedAt','updatedBy'
-            ])
-          ) || (
-            recordLocked()
-            && request.resource.data.reviewStatus == 'pending'
-            && request.resource.data.reviewed == false
-            && request.resource.data.locked == false
-            && request.resource.data.unlockedAt == request.time
-            && request.resource.data.unlockedBy == email()
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'reviewStatus','reviewed','locked','unlockedAt','unlockedBy','updatedAt','updatedBy'
-            ])
-          )
-        );
 
       // Direct amount correction for an active expense without an advance allocation.
       // The manager may correct their own expense or one belonging to another teacher.
