@@ -490,6 +490,38 @@ service cloud.firestore {
     }
 
     match /expenseRecords/{recordId} {
+
+      // All ordinary expense-form saves share one bounded path, including reused vouchers.
+      // Allocation, ownership, manager waiver and audit fields cannot change here.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
+          'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
+          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
+          'voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
+        ])
+        && enabledUser() && (resource.data.ownerEmail == email() || manager())
+        && resource.data.get('deleted', false) == false && !recordLocked()
+        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
+        && request.resource.data.amount is number && request.resource.data.amount >= 0
+        && validExpenseNumbers(request.resource.data)
+        && request.resource.data.get('reviewed', false) == false
+        && request.resource.data.get('locked', false) == false
+        && (
+          (request.resource.data.estimated == true
+            && request.resource.data.reviewStatus == 'estimated'
+            && request.resource.data.get('estimateStage', 'estimated') in ['estimated','purchasing','reimbursing'])
+          || (request.resource.data.estimated == false
+            && request.resource.data.reviewStatus == 'pending'
+            && request.resource.data.get('estimateStage', '') == ''
+            && submissionComplete(request.resource.data))
+        )
+        && (!linked(resource.data) || (
+          request.resource.data.amount == resource.data.amount
+          && request.resource.data.categoryId == resource.data.categoryId
+          && request.resource.data.semester == resource.data.semester
+          && (resource.data.get('estimated', false) == true || request.resource.data.estimated == false)
+        ));
+
       // Corrections leave the owner, evidence, and review lifecycle intact.
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy'
