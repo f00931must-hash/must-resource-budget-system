@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 import {getApps} from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js';
 import {getAuth} from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,query,where,runTransaction,serverTimestamp} from 'https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js';
@@ -5,7 +6,7 @@ const money=new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maxim
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const amount=v=>Number(v||0);
 function context(){const app=getApps().find(a=>a.options.projectId==='must-resource-budget-system');return {db:getFirestore(app),user:getAuth(app).currentUser};}
-async function actor(){const {db,user}=context(),email=user?.email?.toLowerCase();if(!email)throw Error('請先登入');const s=await getDoc(doc(db,'users',email));if(!s.exists()||s.data().enabled!==true)throw Error('帳號未啟用');return {db,email,role:s.data().role};}
+async function actor(){const {db,user}=context(),email=user?.email?.toLowerCase();if(!email)throw Error('請先登入');const s=await getDoc(doc(db,'users',email));if(!s.exists()||s.data().enabled!==true)throw Error('帳號未啟用');return {db,email,role:budgetRole(s.data(),email)};}
 function refresh(){window.dispatchEvent(new Event('budget-advance-refresh'));window.dispatchEvent(new Event('budget-settlement-refresh'));}
 export async function loadSplitPayouts(db,planId,email,ownOnly){
  try{const q=query(collection(db,'advancePayouts'),where(ownOnly?'handlerEmail':'planId','==',ownOnly?email:planId));const s=await getDocs(q);return s.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.planId===planId&&x.deleted!==true);}
@@ -64,13 +65,13 @@ export async function splitAction(button){
   if(!br.exists()||br.data().deleted)throw Error('批次已移除');const reviewer=role==='manager'||role==='advance'&&br.data().handlerEmail===email;
   const stamp={updatedAt:serverTimestamp(),updatedBy:email},parentStamp={...stamp,splitMutationId:id};
   if(action==='receive'){
-   if(p.ownerEmail!==email||p.receivedConfirmed)throw Error('只能確認自己的未領款項');
+   if((p.ownerEmail!==email&&role!=='manager')||p.receivedConfirmed)throw Error('只能確認自己的未領款項');
    tx.update(pr,{receivedConfirmed:true,receivedBy:email,receivedAt:serverTimestamp(),...stamp});tx.update(ar,{splitUnreceived:amount(a.splitUnreceived)-amount(p.amount),...parentStamp});
   }else if(action==='remove'){
    if(!reviewer||p.receivedConfirmed)throw Error('只能刪除尚未領取的款項');
    tx.update(pr,{deleted:true,...stamp});tx.update(ar,{splitAssigned:amount(a.splitAssigned)-amount(p.amount),splitUnreceived:amount(a.splitUnreceived)-amount(p.amount),...parentStamp});
   }else if(action==='refund-report'){
-   if(p.ownerEmail!==email||!p.receivedConfirmed||amount(p.refundPending)>0||value>amount(p.amount)-amount(p.refundTotal))throw Error('退款已申報或超過可退金額');
+   if((p.ownerEmail!==email&&role!=='manager')||!p.receivedConfirmed||amount(p.refundPending)>0||value>amount(p.amount)-amount(p.refundTotal))throw Error('退款已申報或超過可退金額');
    tx.update(pr,{refundPending:value,refundReportedBy:email,refundReportedAt:serverTimestamp(),...stamp});
   }else if(action==='refund-receive'){
    const delta=amount(p.refundPending);if(!reviewer||delta<=0)throw Error('沒有待確認退款或無權限');

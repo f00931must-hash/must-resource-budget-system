@@ -1,0 +1,80 @@
+{
+  "project": "demo-attach",
+  "host": "127.0.0.1",
+  "rules": "e7a32dfc827b7906c3f2fb8cc037a76553ea5989",
+  "results": [
+    {
+      "suite": "tests/permissions-matrix.py",
+      "passed": true,
+      "scenario_lines": 129
+    },
+    {
+      "suite": "tests/expense-permissions-20261118.py",
+      "passed": true,
+      "scenario_lines": 70
+    },
+    {
+      "suite": "tests/reused-voucher-permissions-20261118.py",
+      "passed": true,
+      "scenario_lines": 52
+    },
+    {
+      "suite": "tests/allocation-link-20261120.py",
+      "passed": true,
+      "scenario_lines": 39
+    },
+    {
+      "suite": "tests/refund-receipt-20261119.py",
+      "passed": true,
+      "scenario_lines": 42
+    },
+    {
+      "suite": "tests/split-refund-receipt-20261119.py",
+      "passed": true,
+      "scenario_lines": 21
+    },
+    {
+      "suite": "tests/split-payout-initialization-20261120.py",
+      "passed": true,
+      "scenario_lines": 27
+    },
+    {
+      "suite": "tests/expense-form-emulator-20261120.cjs",
+      "passed": true,
+      "scenario_lines": 18
+    },
+    {
+      "suite": "tests/refund-button-emulator-20261119.cjs",
+      "passed": true,
+      "scenario_lines": 10
+    },
+    {
+      "suite": "tests/split-payout-lifecycle-20261120.cjs",
+      "passed": true,
+      "scenario_lines": 10
+    },
+    {
+      "suite": "tests/no-voucher-form-20261118.cjs",
+      "passed": true,
+      "scenario_lines": 8
+    },
+    {
+      "suite": "tests/allocation-save-diagnostics-20261120.cjs",
+      "passed": true,
+      "scenario_lines": 6
+    }
+  ],
+  "rules_budget_errors": false,
+  "production_tested": false,
+  "scope": "Isolated rules/actual-handler tests with mocked DOM and SDK adapters; no production reads/writes or signed-in browser verification.",
+  "worker_contract_tests": {
+    "passed": 7,
+    "command": "node --test tests/budget-role-policy.test.mjs tests/budget-upload-policy.test.mjs tests/budget-notify-policy.test.mjs tests/budget-loader.test.mjs",
+    "remote_services_tested": false
+  },
+  "static_checks": [
+    "ESLint no-undef on changed runtime modules",
+    "git diff --check"
+  ],
+  "existing_unrelated_failure": "Unchanged reconciliation.test.mjs: expected 500, actual 2000 for 作廢及排除類別不計入. Not modified by this refactor."
+}

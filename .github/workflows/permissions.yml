@@ -1,0 +1,37 @@
+name: Budget permissions
+on:
+  pull_request:
+  push:
+    branches: ['refactor/**']
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Role, upload authorization and loader contracts
+        run: node --test tests/budget-role-policy.test.mjs tests/budget-upload-policy.test.mjs tests/budget-notify-policy.test.mjs tests/budget-loader.test.mjs
+      - name: Frontend undefined-name check
+        run: npx --yes eslint@9.39.1 app-v120.js budget-permissions.mjs budget-advance-v150.js budget-advance-link-existing-v153.js budget-advance-delete-v151.js budget-split-payout.js budget-advance-settlement.js budget-admin-clean-v140.js budget-manager-waiver-click-v139.js budget-no-voucher-request-v137.js budget-my-advance-v170.js budget-attachment-delete-v126.js budget-trash-v128.js budget-trash-plan-restore-v128.js budget-reminder-v160.js
+      - name: Entire emulator permission and actual-handler suite
+        run: python scripts/test-permissions.py
+      - name: Test report and synthetic emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: budget-permissions-results
+          path: |
+            .emulator/report.json
+            .emulator/*.log

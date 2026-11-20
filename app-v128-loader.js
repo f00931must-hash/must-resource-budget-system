@@ -2,7 +2,7 @@
 // Keeps stable app-v120 behavior, routes vouchers private, converts data deletion to 10-day soft delete,
 // and renders the manager no-voucher action directly with each record card.
 
-const SOURCE_URL = "./app-v120.js?v=1.12.4";
+const SOURCE_URL = "./app-v120.js?v=permissions-20261120";
 
 async function loadBudgetApp(){
   const res = await fetch(SOURCE_URL, {cache:"no-store"});
@@ -108,7 +108,7 @@ function switchView`);
   try{ await import(url); }
   finally{ URL.revokeObjectURL(url); }
 
-  await import("./budget-trash-plan-restore-v128.js?v=1.3.10");
+  await import("./budget-trash-plan-restore-v128.js?v=permissions-20261120");
 }
 
 loadBudgetApp().catch(err=>{

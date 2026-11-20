@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget no-voucher request flow v1.3.11
 // Teacher-side only: allows a teacher to request no-voucher handling when submitting.
 // This request NEVER equals manager approval. Manager approval is handled separately.
@@ -105,7 +106,7 @@ async function saveRequestedRecord(){
     id?getDoc(doc(c.db,"expenseRecords",id)):Promise.resolve(null)
   ]);
   if(!userSnap.exists() || userSnap.data().enabled!==true) throw new Error("此帳號未獲授權");
-  const profile=userSnap.data(), isManager=profile.role==="manager";
+  const profile=userSnap.data(), isManager=isBudgetManager(profile,email);
   const existing=existingSnap?.exists()?existingSnap.data():null;
   if(id && !existing) throw new Error("找不到此筆使用紀錄");
   if(existing){
@@ -197,7 +198,7 @@ async function approveConfirmedWaiver(id){
     getDoc(doc(c.db,"users",email)),
     getDoc(doc(c.db,"expenseRecords",id))
   ]);
-  if(!userSnap.exists() || userSnap.data().enabled!==true || userSnap.data().role!=="manager") return;
+  if(!userSnap.exists() || !isBudgetManager(userSnap.data(),email)) return;
   if(!recordSnap.exists()) return;
   const r=recordSnap.data();
   if(r.amountConfirmedByManagerWaiver!==true) return;

@@ -1,5 +1,6 @@
-import {loadSplitPayouts,splitPending,splitMarkup,splitAction} from "./budget-split-payout.js?v=1.0.0";
-import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=1.4.0";
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
+import {loadSplitPayouts,splitPending,splitMarkup,splitAction} from "./budget-split-payout.js?v=permissions-20261120";
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=permissions-20261120";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
@@ -586,8 +587,8 @@ async function init(){
     currentEmail=user.email.toLowerCase();
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
-      if(!u.exists()||u.data().enabled!==true||!["manager","advance"].includes(u.data().role))return;
-      ownOnly=u.data().role==="advance";
+      if(!u.exists()||!canUseAdvance(u.data(),currentEmail))return;
+      ownOnly=isAdvanceOnly(u.data(),currentEmail);
       installUI();
       $("planSelect")?.addEventListener("change",()=>{
         activeBatchId="";
