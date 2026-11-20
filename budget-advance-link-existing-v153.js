@@ -96,8 +96,8 @@ async function loadCandidates(editAllocation=null){
   const batch={id:bid,...bSnap.data()};
   if(ownOnly&&batch.handlerEmail!==currentEmail)throw Error("只能處理自己的預支批次");
   const [rSnap,aSnap]=await Promise.all([
-    getDocs(query(collection(db,"expenseRecords"),where("planId","==",p))),
-    getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p),...(ownOnly?[where("ownerEmail","==",currentEmail)]:[])))
+    getDocs(query(collection(db,"expenseRecords"),where("planId","==",p))).catch(err=>{throw new Error("讀取預估使用紀錄："+(err?.code?err.code+"：":"")+(err?.message||err));}),
+    getDocs(query(collection(db,"advanceAllocations"),where("planId","==",p),...(ownOnly?[where("ownerEmail","==",currentEmail)]:[]))).catch(err=>{throw new Error("讀取預支分配："+(err?.code?err.code+"：":"")+(err?.message||err));})
   ]);
   const activeAllocations=aSnap.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.deleted!==true);
   const usedRecordIds=new Set(activeAllocations.filter(a=>!editAllocation||a.id!==editAllocation.id).map(a=>a.expenseRecordId).filter(Boolean));
@@ -143,13 +143,18 @@ async function openLinkDialog(editAllocation=null){
     }
     renderPreview();
     $("advanceExistingEstimateDialog").showModal();
-  }catch(err){alert("開啟分配失敗："+(err?.message||err));}
+  }catch(err){alert("開啟分配失敗｜20261120-1："+(err?.code?err.code+"：":"")+(err?.message||err));}
 }
 
 async function saveLink(e){
   e.preventDefault();
+  let phase="驗證管理員資格",allocationSaved=false;
+  const saveButton=$("advanceExistingSave");
+  if(saveButton?.disabled)return;
+  if(saveButton)saveButton.disabled=true;
   try{
     const email=await verifyManager();
+    phase="檢查所選計畫與預估";
     const bid=batchId(),p=planId();
     if(!bid||!p)throw new Error("請先選擇預支批次");
     const editId=$("advanceExistingAllocationId").value;
@@ -173,12 +178,14 @@ async function saveLink(e){
       const rid=$("advanceExistingRecordSelect").value;
       const r=availableRecords.find(x=>x.id===rid);
       if(!r)throw new Error("請選擇一筆預估使用紀錄");
+      phase="讀取預支批次";
       const bSnap=await getDoc(doc(db,"advanceBatches",bid));
       if(!bSnap.exists()||bSnap.data().deleted===true)throw new Error("找不到目前預支批次");
       const b=bSnap.data();
       if(ownOnly&&(b.handlerEmail!==email||r.ownerEmail!==email))throw Error("只能分配自己的預估至自己的批次");
       if(!batchCategoryIds(b).includes(String(r.categoryId||""))||r.semester!==b.semester)throw new Error("此預估與目前預支批次的學期或經費科目不一致");
       const aRef=doc(collection(db,"advanceAllocations"));
+      phase="重新讀取預估與批次";
       await runTransaction(db,async tx=>{
       const latest=await tx.get(doc(db,"expenseRecords",r.id)),bs=await tx.get(doc(db,"advanceBatches",bid));
       if(!latest.exists()||!bs.exists()||bs.data().deleted===true)throw Error("資料已變更，請重試");
@@ -186,6 +193,7 @@ async function saveLink(e){
       if(fresh.advanceAllocationId||fresh.deleted===true||fresh.estimated!==true||approved(fresh)||Number(fresh.amount)!==num(r.amount))throw Error("預估已變更或已分配，請重新選取");
       if(fresh.ownerEmail!==r.ownerEmail||fresh.categoryId!==r.categoryId||fresh.planId!==p||fresh.semester!==b.semester)throw Error("預估內容已變更，請重試");
       if(ownOnly&&(fresh.ownerEmail!==email||bs.data().handlerEmail!==email))throw Error("只能分配自己的紀錄");
+      phase="同步寫入分配與使用紀錄";
       tx.set(aRef,{
         planId:p,batchId:bid,expenseRecordId:r.id,
         categoryId:r.categoryId||"",categoryName:batchCategoryLabel(b,r.categoryId)||"",
@@ -200,11 +208,21 @@ async function saveLink(e){
         updatedAt:serverTimestamp(),updatedBy:email
       });
       });
+      allocationSaved=true;
+      phase="寫入分配操作紀錄";
       await addDoc(collection(db,"auditLogs"),{type:"advance-allocation",targetId:aRef.id,planId:p,action:"link-existing-estimate",expenseRecordId:r.id,actorEmail:email,createdAt:serverTimestamp()});
     }
+    phase="更新分配畫面";
     $("advanceExistingEstimateDialog").close();
     location.reload();
-  }catch(err){alert("儲存活動分配失敗："+(err?.message||err));}
+  }catch(err){
+    console.error("allocation-save 20261120-1",phase,err);
+    const details=`階段：${phase}｜版本：20261120-1\n${err?.code?err.code+"：":""}${err?.message||err}`;
+    if(allocationSaved){
+      $("advanceExistingEstimateDialog").close();
+      alert("活動分配已儲存，但後續處理失敗。請重新整理確認，勿重複分配。\n"+details);
+    }else alert("活動分配未完成。\n"+details);
+  }finally{if(saveButton)saveButton.disabled=false;}
 }
 
 window.addEventListener("click",async e=>{
