@@ -350,9 +350,9 @@ service cloud.firestore {
     // Managers manage all allocations. Regular users may read only their own allocation
     // and may only confirm that the allocated amount was received.
     match /advanceAllocations/{allocationId} {
-      // Split refunds must validate the payout and expense together, including for managers.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['splitRefundTotal'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['splitRefundTotal','splitMutationId','updatedAt','updatedBy'])
+      // Initialize split payouts and validate later mutations with their linked payout.
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients','updatedAt','updatedBy'])
         && request.resource.data.updatedAt == request.time
         && payoutParentChange(allocationId);
 
