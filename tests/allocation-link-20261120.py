@@ -24,13 +24,15 @@ def jwt(email):
 owner='teacher@example.test'
 for role in ['manager','advance','teacher']:
  actor=role+'@example.test'
- for mode in ['first','other-owner','single-category','empty-link','preexisting-original','already-linked','locked','mismatch-category','mismatch-semester','wrong-amount','missing-allocation']:
+ for mode in ['first','other-owner','single-category','empty-link','preexisting-original','null-original','null-categories','already-linked','locked','mismatch-category','mismatch-semester','wrong-amount','missing-allocation']:
   own=owner if role=='manager' or mode=='other-owner' else actor
   batch={'planId':'p','semester':'115-1','categoryIds':['c','d'],'handlerEmail':'advance@example.test','deleted':False}
   if mode=='single-category':batch={'planId':'p','semester':'115-1','categoryId':'c','handlerEmail':'advance@example.test','deleted':False}
   record={'planId':'p','categoryId':'c','semester':'115-1','purpose':'test','ownerEmail':own,'ownerName':'測試','createdBy':own,'amount':100,'estimated':True,'reviewStatus':'estimated','reviewed':False,'locked':False,'deleted':False}
   if mode=='empty-link':record['advanceAllocationId']=''
   if mode=='preexisting-original':record['originalEstimatedAmount']=90
+  if mode=='null-original':record.update(originalEstimatedAmount=None,advanceAllocationId=None)
+  if mode=='null-categories':batch.update(categoryIds=None,categoryId='c')
   if mode=='already-linked':record['advanceAllocationId']='old'
   if mode=='locked':record.update(locked=True,reviewed=True,reviewStatus='approved')
   if mode=='mismatch-category':batch['categoryIds']=['other']
@@ -39,11 +41,11 @@ for role in ['manager','advance','teacher']:
   # A fresh allocation id is essential, just as doc(collection(...)) generates in saveLink.
   aid=role+'-'+mode
   allocation={'planId':'p','batchId':'b','expenseRecordId':'e','categoryId':'c','categoryName':'test','ownerEmail':own,'ownerName':'測試','purpose':'test','estimatedAmount':101 if mode=='wrong-amount' else 100,'note':'','recordOrigin':'existing-estimate','deleted':False,'createdBy':actor,'updatedBy':actor}
-  new={**record,'advanceBatchId':'b','advanceAllocationId':aid,'advanceLinked':True,'originalEstimatedAmount':record.get('originalEstimatedAmount',100),'updatedBy':actor}
+  new={**record,'advanceBatchId':'b','advanceAllocationId':aid,'advanceLinked':True,'originalEstimatedAmount':record.get('originalEstimatedAmount') if record.get('originalEstimatedAmount') is not None else 100,'updatedBy':actor}
   writes=[write('advanceAllocations/'+aid,allocation,['createdAt','updatedAt']),write('expenseRecords/e',new,['updatedAt'])]
   if mode=='missing-allocation':writes=writes[1:]
   status,msg=call(writes,jwt(actor))
-  allowed=role=='manager' and mode in ['first','other-owner','single-category','empty-link','preexisting-original'] or role=='advance' and mode in ['first','single-category','empty-link','preexisting-original']
+  allowed=role=='manager' and mode in ['first','other-owner','single-category','empty-link','preexisting-original','null-original','null-categories'] or role=='advance' and mode in ['first','single-category','empty-link','preexisting-original','null-original','null-categories']
   expected=200 if allowed else 403
   print(role,mode,status,'PASS' if status==expected else 'FAIL','LIMIT' if '1000' in msg else '',flush=True)
   assert status==expected,(role,mode,status,msg)

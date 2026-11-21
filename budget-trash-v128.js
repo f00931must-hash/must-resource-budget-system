@@ -1,3 +1,4 @@
+import {isBudgetManager,canUseAdvance} from "./budget-permissions.mjs";
 // Budget recycle bin v1.2.8
 // Manager-only recycle bin for plans, categories, and usage records.
 // Retention: 10 days. Attachments never enter recycle bin.
@@ -177,7 +178,7 @@ async function loadTrash(){
     currentEmail=String(user.email).toLowerCase();
     try{
       const snap=await getDoc(doc(db,"users",currentEmail));
-      if(!snap.exists()||snap.data().enabled!==true||snap.data().role!=="manager")return;
+      if(!snap.exists()||!isBudgetManager(snap.data(),currentEmail))return;
       installUI();
       const data=await allDeleted(); await purgeExpired(data);
     }catch(e){console.warn("Recycle bin init skipped",e);}

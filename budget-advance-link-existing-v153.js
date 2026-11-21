@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget advance allocation -> existing estimated usage record v1.5.3
 // New allocation flow: manager selects an existing estimated expense record.
 // No duplicate expense record is created. The allocation only links to the selected record.
@@ -44,8 +45,8 @@ async function verifyManager(){
   if(!user?.email)throw new Error("尚未登入");
   const email=user.email.toLowerCase();
   const snap=await getDoc(doc(db,"users",email));
-  if(!snap.exists()||snap.data().enabled!==true||!["manager","advance"].includes(snap.data().role))throw new Error("此功能僅限經費管理員使用");
-  ownOnly=snap.data().role==="advance";
+  if(!snap.exists()||!canUseAdvance(snap.data(),email))throw new Error("此功能僅限經費管理員使用");
+  ownOnly=isAdvanceOnly(snap.data(),email);
   return email;
 }
 
@@ -253,7 +254,7 @@ async function init(){
     currentEmail=user.email.toLowerCase();
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
-      isManager=u.exists()&&u.data().enabled===true&&["manager","advance"].includes(u.data().role);
+      isManager=u.exists()&&canUseAdvance(u.data(),currentEmail);
       if(isManager)installDialog();
     }catch(err){console.warn("advance existing-estimate link init failed",err);}
   });

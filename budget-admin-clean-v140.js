@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget admin unified controller v1.7.0
 // Performance-safe manager controller.
 // Keeps manager waiver/review behavior while avoiding Firestore re-queries caused by its own DOM patches.
@@ -97,7 +98,7 @@ async function verifyManagerAndRecord(id){
   if(!user?.email) throw new Error("尚未登入");
   const email=user.email.toLowerCase();
   const [userSnap,recordSnap]=await Promise.all([getDoc(doc(aDb,"users",email)),getDoc(doc(aDb,"expenseRecords",id))]);
-  if(!userSnap.exists() || userSnap.data().enabled!==true || userSnap.data().role!=="manager") throw new Error("此功能僅限經費管理員使用");
+  if(!userSnap.exists() || !isBudgetManager(userSnap.data(),email)) throw new Error("此功能僅限經費管理員使用");
   if(!recordSnap.exists()) throw new Error("找不到此筆使用紀錄");
   return {db:aDb,email,r:recordSnap.data()};
 }
@@ -160,7 +161,7 @@ async function init(){
     if(!user?.email){ manager=false; return; }
     try{
       const snap=await getDoc(doc(db,"users",user.email.toLowerCase()));
-      manager=snap.exists() && snap.data().enabled===true && snap.data().role==="manager";
+      manager=snap.exists() && isBudgetManager(snap.data(),user.email);
       if(manager) schedule(80);
     }catch(err){ console.warn(err); }
   });

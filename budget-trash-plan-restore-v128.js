@@ -1,3 +1,4 @@
+import {isBudgetManager,canUseAdvance} from "./budget-permissions.mjs";
 // Plan restore companion for recycle bin v1.2.8.
 // Restoring a deleted plan also restores categories soft-deleted with that plan.
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
@@ -18,7 +19,7 @@ document.addEventListener("click",async e=>{
   try{
     busy=true;
     const userSnap=await getDoc(doc(db,"users",email));
-    if(!userSnap.exists()||userSnap.data().enabled!==true||userSnap.data().role!=="manager")throw new Error("只有經費管理員可以還原計畫。");
+    if(!userSnap.exists()||!isBudgetManager(userSnap.data(),email))throw new Error("只有經費管理員可以還原計畫。");
     const planRef=doc(db,"budgetPlans",id),planSnap=await getDoc(planRef);
     if(!planSnap.exists()||planSnap.data().deleted!==true)throw new Error("此計畫已不存在或已還原。");
     const plan=planSnap.data();

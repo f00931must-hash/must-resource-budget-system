@@ -1,3 +1,4 @@
+import {isBudgetManager,canUseAdvance} from "./budget-permissions.mjs";
 import { getApps, getApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import { getFirestore, doc, getDoc, getDocFromServer, getDocs, updateDoc, addDoc, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
@@ -201,7 +202,7 @@ onAuthStateChanged(auth,async u=>{
   if(!u) return;
   try{
     const snap=await getDoc(doc(db,"users",u.email.toLowerCase()));
-    manager=snap.exists()&&snap.data().enabled===true&&snap.data().role==="manager";
+    manager=snap.exists()&&isBudgetManager(snap.data(),u.email);
     schedule(500);
   }catch(err){console.warn(err);}
 });

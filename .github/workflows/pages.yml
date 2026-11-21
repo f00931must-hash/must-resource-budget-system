@@ -15,7 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  permissions:
+    uses: ./.github/workflows/permissions.yml
   deploy:
+    needs: permissions
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

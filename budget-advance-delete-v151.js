@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget advance manager-only delete controls v1.5.6
 // 1) Batch deletion is manager-only and blocked while active allocations remain.
 // 2) Existing-estimate allocations are unlinked without deleting the original usage record.
@@ -24,8 +25,8 @@ async function verifyManager(){
   if(!user?.email)throw new Error("尚未登入");
   const email=user.email.toLowerCase();
   const snap=await getDoc(doc(db,"users",email));
-  if(!snap.exists()||snap.data().enabled!==true||!["manager","advance"].includes(snap.data().role))throw new Error("此功能僅限經費管理員使用");
-  ownOnly=snap.data().role==="advance";
+  if(!snap.exists()||!canUseAdvance(snap.data(),email))throw new Error("此功能僅限經費管理員使用");
+  ownOnly=isAdvanceOnly(snap.data(),email);
   return email;
 }
 
@@ -248,9 +249,9 @@ async function init(){
     if(!user?.email)return;
     try{
       const u=await getDoc(doc(db,"users",user.email.toLowerCase()));
-      manager=u.exists()&&u.data().enabled===true&&["manager","advance"].includes(u.data().role);
-      ownOnly=u.data()?.role==="advance";
       currentEmail=user.email.toLowerCase();
+      manager=u.exists()&&canUseAdvance(u.data(),currentEmail);
+      ownOnly=isAdvanceOnly(u.data(),currentEmail);
       if(manager){[120,350,700].forEach(ms=>setTimeout(patch,ms));}
     }catch(err){console.warn("advance delete init failed",err);}
   });

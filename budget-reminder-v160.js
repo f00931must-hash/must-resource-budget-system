@@ -1,3 +1,4 @@
+import {isBudgetManager,canUseAdvance} from "./budget-permissions.mjs";
 // Budget reminder manager center v1.6.2
 // Manager-only reminder settings, preview and LINE notification controls.
 // No global MutationObserver; avoids the previous nav reorder / page hang issue.
@@ -73,5 +74,5 @@ async function sendLineNow(){try{const s=formData();if(!s.enabled)throw new Erro
 
 async function loadAll(){const p=planId();if(!p){settings=null;records=[];fillForm();renderPreview();return;}const [sSnap]=await Promise.all([getDoc(doc(db,"reminderSettings",p)),loadRecords()]);settings=sSnap.exists()?sSnap.data():{...DEFAULTS};fillForm();renderPreview();loadLineStatus().catch(e=>{lineStatus=null;renderLineStatus();console.warn("LINE status unavailable",e);});}
 function showError(err){console.error("reminder center error",err);alert("提醒系統發生錯誤："+(err?.message||err));}
-async function init(){for(let i=0;i<120;i++){const a=app();if(a){auth=getAuth(a);db=getFirestore(a);break;}await new Promise(r=>setTimeout(r,50));}if(!auth||!db)return;onAuthStateChanged(auth,async user=>{isManager=false;if(!user?.email)return;currentEmail=user.email.toLowerCase();try{const u=await getDoc(doc(db,"users",currentEmail));isManager=u.exists()&&u.data().enabled===true&&u.data().role==="manager";if(!isManager)return;for(let i=0;i<30&&!installUI();i++)await new Promise(r=>setTimeout(r,100));if(location.hash==="#reminders")$("reminderTab")?.click();}catch(e){showError(e);}});}
+async function init(){for(let i=0;i<120;i++){const a=app();if(a){auth=getAuth(a);db=getFirestore(a);break;}await new Promise(r=>setTimeout(r,50));}if(!auth||!db)return;onAuthStateChanged(auth,async user=>{isManager=false;if(!user?.email)return;currentEmail=user.email.toLowerCase();try{const u=await getDoc(doc(db,"users",currentEmail));isManager=u.exists()&&isBudgetManager(u.data(),currentEmail);if(!isManager)return;for(let i=0;i<30&&!installUI();i++)await new Promise(r=>setTimeout(r,100));if(location.hash==="#reminders")$("reminderTab")?.click();}catch(e){showError(e);}});}
 init();

@@ -1,5 +1,6 @@
-import {renderOwnSplitPayouts} from "./budget-split-payout.js?v=1.0.0";
-import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=1.4.0";
+import {isBudgetManager,canUseAdvance} from "./budget-permissions.mjs";
+import {renderOwnSplitPayouts} from "./budget-split-payout.js?v=permissions-20261120";
+import {settlementMarkup,settlementAction} from "./budget-advance-settlement.js?v=permissions-20261120";
 // Teacher own advance allocation view v1.7.6
 // All enabled users, including managers, see only their own allocations here
 // and can perform one action: confirm receipt of the allocated amount.
@@ -112,7 +113,7 @@ async function init(){
     try{
       const u=await getDoc(doc(db,"users",currentEmail));
       if(!u.exists()||u.data().enabled!==true)return;
-      selfManage=u.data().role==="advance";
+      selfManage=canUseAdvance(u.data(),currentEmail);
       installUI();
       $("planSelect")?.addEventListener("change",()=>{if($("myAdvance")?.classList.contains("active-view"))loadOwn().catch(showError);});
     }catch(err){showError(err);}

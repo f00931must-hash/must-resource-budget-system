@@ -2,7 +2,7 @@
 // Safe wrapper around the current stable app-v128-loader.
 // Adds an optional estimateStage field while preserving estimated=true compatibility.
 
-const BASE_LOADER = "./app-v128-loader.js?v=1.12.4";
+const BASE_LOADER = "./app-v128-loader.js?v=permissions-20261120";
 
 async function loadStageAwareBudgetApp(){
   const res = await fetch(BASE_LOADER,{cache:"no-store"});
@@ -51,8 +51,8 @@ async function loadStageAwareBudgetApp(){
   // The stable loader is evaluated from a Blob, so its relative dynamic import
   // must be made absolute before evaluation.
   loader = loader.replace(
-    'await import("./budget-trash-plan-restore-v128.js?v=1.3.10");',
-    'await import(new URL("./budget-trash-plan-restore-v128.js?v=1.3.10", location.href).href);'
+    'await import("./budget-trash-plan-restore-v128.js?v=permissions-20261120");',
+    'await import(new URL("./budget-trash-plan-restore-v128.js?v=permissions-20261120", location.href).href);'
   );
 
   const blob = new Blob([loader],{type:"text/javascript"});

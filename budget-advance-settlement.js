@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 import {getApps} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import {getAuth} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import {getFirestore,doc,getDoc,runTransaction,serverTimestamp} from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
@@ -28,8 +29,8 @@ export async function settlementAction(button){
  if(!email)return;
  const action=button.dataset.settlementAction,id=button.dataset.allocation;
  const me=await getDoc(doc(db,"users",email));if(!me.exists()||me.data().enabled!==true)throw Error("帳號未啟用");
- const manager=me.data().role==="manager";
- const ownOnly=me.data().role==="advance";
+ const manager=isBudgetManager(me.data(),email);
+ const ownOnly=isAdvanceOnly(me.data(),email);
  if(action==="receive"&&!manager&&!ownOnly)throw Error("僅管理員或本人預支承辦人可以確認");
  if(!["report","receive"].includes(action))throw Error("請重新整理使用新版退款流程");
  const input=button.parentElement?.querySelector("[data-refund-amount]");
@@ -47,7 +48,7 @@ export async function settlementAction(button){
  const r=rs.data();if(r.deleted===true||r.advanceAllocationId!==id)throw Error("連結已變更，請重新整理");
  const now=serverTimestamp(),stamp={updatedAt:now,updatedBy:email};
  if(action==="report"){
- if(String(a.ownerEmail||"").toLowerCase()!==email||(a.refundReported===true&&a.refundReceivedConfirmed!==true))throw Error("不能重複申報此筆退款");
+ if((!manager&&String(a.ownerEmail||"").toLowerCase()!==email)||(a.refundReported===true&&a.refundReceivedConfirmed!==true))throw Error("不能重複申報此筆退款");
  const previous=refunded(a); if(amount>Number(a.estimatedAmount)-previous)throw Error("累積退款不可超過原分配金額");
  if(Number(r.amount)!==Number(a.estimatedAmount)-previous)throw Error("使用紀錄金額與退款紀錄不符，請管理員確認");
  tx.update(ar,{refundReported:true,refundReceivedConfirmed:false,refundConfirmedTotal:previous,refundAmount:previous+amount,refundReportedBy:email,refundReportedAt:now,...stamp});

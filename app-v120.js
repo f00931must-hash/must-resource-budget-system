@@ -1,3 +1,4 @@
+const {isBudgetManager} = await import(new URL("./budget-permissions.mjs", location.href).href);
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
 import { getFirestore, collection, addDoc, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, updateDoc, deleteDoc, query, orderBy, where, serverTimestamp, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
@@ -72,7 +73,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
     if(!valid())return false;
     try{
       const snap=await getDocFromServer(doc(db,"users",email));
-      return valid()&&snap.exists()&&snap.data().enabled===true&&snap.data().role==="manager";
+      return valid()&&snap.exists()&&isBudgetManager(snap.data(),email);
     }catch{return false;}
   };
   button.disabled=true;
@@ -134,7 +135,7 @@ onAuthStateChanged(auth, async user=>{
       if(!live.exists()||live.data().enabled!==true){signOut(auth);return;}
       if(live.data().role!==loadedRole){location.reload();}
     },error=>{console.error("Budget role refresh failed",error);});
-    if(state.profile?.role==="manager") await loadBudgetUsers();
+    if(isManager()) await loadBudgetUsers();
     $("userName").textContent=state.profile.name||user.displayName||user.email;
     $("userEmail").textContent=user.email;
     $("roleBadge").textContent=isManager()?"經費管理員":state.profile?.role==="advance"?"預支承辦人":"經費使用者";
@@ -151,7 +152,7 @@ onAuthStateChanged(auth, async user=>{
   }
 });
 
-function isManager(){ return state.profile?.role === "manager"; }
+function isManager(){ return isBudgetManager(state.profile,state.user?.email); }
 async function loadBudgetUsers(){
   if(!isManager()){ state.budgetUsers=[]; return; }
   const snap=await getDocs(collection(db,"users"));
@@ -590,7 +591,7 @@ function githubPathFromUrl(v){
 }
 async function githubDeleteFile(pathOrUrl,name="file"){
   const path=githubPathFromUrl(pathOrUrl); if(!path)return false;
-  await uploadServiceRequest("/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path,name})}); return true;
+  await uploadServiceRequest("/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path,name,referenceId:$("recordId")?.value||""})}); return true;
 }
 async function uploadVoucherFile(file){
   const form=new FormData(); form.append("file",file); form.append("system","shared");
@@ -855,7 +856,7 @@ async function verifyBudgetManagerForExport(){
   if(!email)return false;
   try{
     const snap=await getDoc(doc(db,"users",email));
-    return snap.exists()&&snap.data().enabled===true&&snap.data().role==="manager";
+    return snap.exists()&&isBudgetManager(snap.data(),email);
   }catch{return false;}
 }
 function budgetUserName(email,fallback=""){

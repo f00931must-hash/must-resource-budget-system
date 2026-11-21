@@ -1,3 +1,4 @@
+import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget manager event shield v1.7.2
 // All manager review clicks are intercepted synchronously here so older handlers
 // cannot receive the same click and show duplicate confirmation dialogs.
@@ -21,7 +22,7 @@ async function ctxFor(id){
   if(!user?.email) throw new Error("尚未登入");
   const email=user.email.toLowerCase();
   const [u,r]=await Promise.all([getDoc(doc(db,"users",email)),getDoc(doc(db,"expenseRecords",id))]);
-  if(!u.exists() || u.data().enabled!==true || u.data().role!=="manager") throw new Error("此功能僅限經費管理員使用");
+  if(!u.exists() || !isBudgetManager(u.data(),email)) throw new Error("此功能僅限經費管理員使用");
   if(!r.exists()) throw new Error("找不到此筆使用紀錄");
   return {db,email,r:r.data()};
 }

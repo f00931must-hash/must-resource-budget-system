@@ -27,8 +27,7 @@ service cloud.firestore {
     }
 
     function manager() {
-      return primaryManager()
-        || (enabledUser() && userDoc().data.role == 'manager');
+      return enabledUser() && (primaryManager() || userDoc().data.role == 'manager');
     }
 
     // 預支承辦人僅可操作本人批次與本人分配，並保留一般使用者權限。
@@ -45,14 +44,9 @@ service cloud.firestore {
     function refundReviewer(data) {
       return manager() || (advanceOfficer() && data.ownerEmail == email());
     }
-    function ownRecordServiceUpdate() {
-      return linked(resource.data) && advanceOfficer() && resource.data.ownerEmail == email()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'amount','refundAdjustment','actualAdjustment','advanceBatchId','advanceAllocationId','advanceLinked','updatedAt','updatedBy'
-        ]) && (refundAmountApproval() || allocationCancellation());
-    }
+
     function payoutReviewer(a) {
-      return manager() || (advanceOfficer() && ownAllocation(a));
+      return manager() || ownAllocation(a);
     }
     function payoutParentChange(allocationId) {
       let a=resource.data;
@@ -61,42 +55,37 @@ service cloud.firestore {
       let after=getAfter(/databases/$(database)/documents/advancePayouts/$(pid)).data;
       let existed=exists(/databases/$(database)/documents/advancePayouts/$(pid));
       let before=existed ? get(/databases/$(database)/documents/advancePayouts/$(pid)).data : {};
-      return enabledUser() && a.get('deleted',false)==false
-        && b.get('payoutSplit',false)==true
-        && a.get('allocationReceivedConfirmed',false)==false
-        && a.get('refundReported',false)==false
+      return a.get('deleted',false) != true && b.get('payoutSplit',false)==true
+        && a.get('allocationReceivedConfirmed',false) != true && a.get('refundReported',false) != true
         && b.diff(a).affectedKeys().hasOnly(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients','updatedAt','updatedBy'])
         && after.allocationId==allocationId
         && b.splitAssigned>=0 && b.splitAssigned<=a.estimatedAmount
         && b.splitUnreceived>=0 && b.splitUnreceived<=b.splitAssigned
         && b.splitRefundTotal>=0 && b.splitRefundTotal<=b.splitAssigned
-        && b.updatedBy==email()
-        && (
-          (!existed && payoutReviewer(a) && after.createdBy==email()
-            && after.amount is int && after.amount>0
-            && b.splitAssigned==a.get('splitAssigned',0)+after.amount
-            && b.splitUnreceived==a.get('splitUnreceived',0)+after.amount
-            && b.splitRefundTotal==a.get('splitRefundTotal',0)
-            && b.splitRecipients.diff(a.get('splitRecipients',{})).affectedKeys().hasOnly([after.ownerEmail])
-            && b.splitRecipients[after.ownerEmail]==true)
-          || (existed && before.get('deleted',false)==false
-            && b.splitRecipients==a.splitRecipients
-            && (
-              (before.ownerEmail==email() && before.receivedConfirmed==false && after.receivedConfirmed==true
-                && after.get('deleted',false)==false
+        && (existed ? (
+          before.get('deleted',false) != true && b.splitRecipients==a.splitRecipients
+          && (before.receivedConfirmed==false ? (
+            after.get('deleted',false)==true ?
+              (payoutReviewer(a) && b.splitAssigned==a.splitAssigned-before.amount
+                && b.splitUnreceived==a.splitUnreceived-before.amount && b.splitRefundTotal==a.splitRefundTotal)
+            : ((before.ownerEmail==email() || payoutReviewer(a)) && after.receivedConfirmed==true
                 && b.splitAssigned==a.splitAssigned && b.splitRefundTotal==a.splitRefundTotal
                 && b.splitUnreceived==a.splitUnreceived-before.amount)
-              || (payoutReviewer(a) && before.receivedConfirmed==false && after.deleted==true
-                && b.splitAssigned==a.splitAssigned-before.amount
-                && b.splitUnreceived==a.splitUnreceived-before.amount
-                && b.splitRefundTotal==a.splitRefundTotal)
-              || (payoutReviewer(a) && before.receivedConfirmed==true && before.refundPending>0
-                && after.refundPending==0 && after.refundTotal==before.refundTotal+before.refundPending
-                && b.splitAssigned==a.splitAssigned && b.splitUnreceived==a.splitUnreceived
-                && b.splitRefundTotal==a.splitRefundTotal+before.refundPending
-                && getAfter(/databases/$(database)/documents/expenseRecords/$(a.expenseRecordId)).data.amount==a.estimatedAmount-b.splitRefundTotal)
-            ))
-        );
+          ) : (
+            payoutReviewer(a) && before.refundPending>0 && after.refundPending==0
+            && after.refundTotal==before.refundTotal+before.refundPending
+            && b.splitAssigned==a.splitAssigned && b.splitUnreceived==a.splitUnreceived
+            && b.splitRefundTotal==a.splitRefundTotal+before.refundPending
+            && getAfter(/databases/$(database)/documents/expenseRecords/$(a.expenseRecordId)).data.amount==a.estimatedAmount-b.splitRefundTotal
+          ))
+        ) : (
+          payoutReviewer(a) && after.createdBy==email() && after.amount is int && after.amount>0
+          && b.splitAssigned==a.get('splitAssigned',0)+after.amount
+          && b.splitUnreceived==a.get('splitUnreceived',0)+after.amount
+          && b.splitRefundTotal==a.get('splitRefundTotal',0)
+          && b.splitRecipients.diff(a.get('splitRecipients',{})).affectedKeys().hasOnly([after.ownerEmail])
+          && b.splitRecipients[after.ownerEmail]==true
+        ));
     }
     function payoutExpenseRefund() {
       let a=get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
@@ -118,6 +107,51 @@ service cloud.firestore {
         : get(/databases/$(database)/documents/advanceAllocations/$(payout.allocationId)).data.ownerEmail;
     }
 
+    function payoutReceive(payoutId) {
+      return (resource.data.ownerEmail==email() || manager()) && resource.data.receivedConfirmed==false && request.resource.data.receivedConfirmed==true
+            && request.resource.data.receivedBy==email() && request.resource.data.receivedAt==request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receivedConfirmed','receivedBy','receivedAt','updatedAt','updatedBy'])
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitUnreceived==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitUnreceived-resource.data.amount;
+    }
+
+    function payoutReport(payoutId) {
+      return (resource.data.ownerEmail==email() || manager()) && resource.data.receivedConfirmed==true && resource.data.refundPending==0
+            && request.resource.data.refundPending is int && request.resource.data.refundPending>0
+            && request.resource.data.refundPending<=resource.data.amount-resource.data.refundTotal
+            && request.resource.data.refundReportedBy==email() && request.resource.data.refundReportedAt==request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundPending','refundReportedBy','refundReportedAt','updatedAt','updatedBy']);
+    }
+
+    function payoutRemove(payoutId) {
+      return payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data)
+            && resource.data.receivedConfirmed==false && request.resource.data.deleted==true
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','updatedAt','updatedBy'])
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitAssigned==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitAssigned-resource.data.amount;
+    }
+
+    function payoutRefundReceipt(payoutId) {
+      return payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data)
+            && resource.data.receivedConfirmed==true && resource.data.refundPending>0
+            && request.resource.data.refundPending==0 && request.resource.data.refundTotal==resource.data.refundTotal+resource.data.refundPending
+            && request.resource.data.refundReceivedBy==email() && request.resource.data.refundReceivedAt==request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundTotal','refundPending','refundHistory','refundReceivedBy','refundReceivedAt','updatedAt','updatedBy'])
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitRefundTotal==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitRefundTotal+resource.data.refundPending;
+    }
+
+    function payoutUpdate(payoutId) {
+      let k=changed();
+      return resource.data.get('deleted', false) != true
+        && get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.get('deleted', false) != true
+        && (k.hasAny(['deleted']) ? payoutRemove(payoutId)
+          : k.hasAny(['receivedConfirmed','receivedBy','receivedAt']) ? payoutReceive(payoutId)
+          : k.hasAny(['refundTotal','refundReceivedBy','refundReceivedAt','refundHistory']) ? payoutRefundReceipt(payoutId)
+          : k.hasAny(['refundPending','refundReportedBy','refundReportedAt']) ? payoutReport(payoutId)
+          : false);
+    }
+
     match /advancePayouts/{payoutId} {
       allow read: if manager() || (enabledUser() && resource.data.ownerEmail==email())
         || (advanceOfficer() && resource.data.handlerEmail==email());
@@ -135,33 +169,7 @@ service cloud.firestore {
         && payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data)
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.splitMutationId==payoutId
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.splitAssigned==get(/databases/$(database)/documents/advanceAllocations/$(request.resource.data.allocationId)).data.get('splitAssigned',0)+request.resource.data.amount;
-      allow update: if enabledUser() && resource.data.deleted==false
-        && get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.get('deleted',false)==false
-        && request.resource.data.updatedBy==email()
-        && (
-          (resource.data.ownerEmail==email() && resource.data.receivedConfirmed==false && request.resource.data.receivedConfirmed==true
-            && request.resource.data.receivedBy==email() && request.resource.data.receivedAt==request.time
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['receivedConfirmed','receivedBy','receivedAt','updatedAt','updatedBy'])
-            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
-            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitUnreceived==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitUnreceived-resource.data.amount)
-          || (resource.data.ownerEmail==email() && resource.data.receivedConfirmed==true && resource.data.refundPending==0
-            && request.resource.data.refundPending is int && request.resource.data.refundPending>0
-            && request.resource.data.refundPending<=resource.data.amount-resource.data.refundTotal
-            && request.resource.data.refundReportedBy==email() && request.resource.data.refundReportedAt==request.time
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundPending','refundReportedBy','refundReportedAt','updatedAt','updatedBy']))
-          || (payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data)
-            && resource.data.receivedConfirmed==false && request.resource.data.deleted==true
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','updatedAt','updatedBy'])
-            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
-            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitAssigned==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitAssigned-resource.data.amount)
-          || (payoutReviewer(get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data)
-            && resource.data.receivedConfirmed==true && resource.data.refundPending>0
-            && request.resource.data.refundPending==0 && request.resource.data.refundTotal==resource.data.refundTotal+resource.data.refundPending
-            && request.resource.data.refundReceivedBy==email() && request.resource.data.refundReceivedAt==request.time
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundTotal','refundPending','refundHistory','refundReceivedBy','refundReceivedAt','updatedAt','updatedBy'])
-            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitMutationId==payoutId
-            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitRefundTotal==get(/databases/$(database)/documents/advanceAllocations/$(resource.data.allocationId)).data.splitRefundTotal+resource.data.refundPending)
-        );
+      allow update: if enabledUser() && stamped() && payoutUpdate(payoutId);
       allow delete: if false;
     }
 
@@ -207,24 +215,12 @@ service cloud.firestore {
       let allocationId = data.get('advanceAllocationId', '');
       return allocationId != null && allocationId != '';
     }
-    function adjustmentApproval() {
-      let before = resource.data.get('actualAdjustment', {});
-      let after = request.resource.data.get('actualAdjustment', {});
-      return manager()
-        && before.get('status', '') == 'pending'
-        && after.get('status', '') == 'approved'
-        && after.get('amount', -1) == before.get('amount', -2)
-        && after.get('requestedBy', '') == before.get('requestedBy', '')
-        && after.get('reviewedBy', '') == email()
-        && request.resource.data.amount == before.amount
-        && request.resource.data.estimated == false
-        && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.settlementAmount == before.amount;
-    }
+
     function refundAmountApproval() {
       let a = get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
       let after = getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data;
       return refundReviewer(a) && resource.data.ownerEmail == a.ownerEmail && a.get('refundReported', false) == true
-        && a.get('refundReceivedConfirmed', false) == false
+        && a.get('refundReceivedConfirmed', false) != true
         && after.get('refundReceivedConfirmed', false) == true
         && after.refundReceivedBy == email()
         && after.refundAmount == a.refundAmount
@@ -236,42 +232,8 @@ service cloud.firestore {
         && request.resource.data.amount == resource.data.amount
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.get('deleted', false) == true;
     }
-    function linkedRecordProtected() {
-      return !linked(resource.data) || allocationCancellation() || (
-        request.resource.data.get('advanceAllocationId', '') == resource.data.advanceAllocationId
-        && request.resource.data.get('advanceBatchId', '') == resource.data.get('advanceBatchId', '')
-        && request.resource.data.ownerEmail == resource.data.ownerEmail
-        && request.resource.data.categoryId == resource.data.categoryId
-        && request.resource.data.semester == resource.data.semester
-        && request.resource.data.get('originalEstimatedAmount', 0) == resource.data.get('originalEstimatedAmount', 0)
-        && (request.resource.data.amount == resource.data.amount || adjustmentApproval() || refundAmountApproval() || payoutExpenseRefund())
-        && (request.resource.data.get('estimated', false) == resource.data.get('estimated', false) || adjustmentApproval() || (request.resource.data.get('estimated', true) == false && amountConfirmed(request.resource.data) && hasVoucher(request.resource.data) && request.resource.data.get('archived', false) == true))
-      );
-    }
-    function adjustmentProtected() {
-      let before = resource.data.get('actualAdjustment', {});
-      let after = request.resource.data.get('actualAdjustment', {});
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustment'])
-        || (
-          linked(resource.data)
-          && before.get('status', '') in ['', 'rejected']
-          && after.keys().hasOnly(['status','amount','reason','requestedBy','requestedAt'])
-          && after.status == 'pending'
-          && after.amount is number && after.amount >= 0
-          && after.amount <= get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.estimatedAmount
-          && after.reason is string && after.reason.size() > 0 && after.reason.size() <= 300
-          && after.requestedBy == email() && after.requestedAt == request.time
-          && request.resource.data.estimated == true
-          && request.resource.data.amountConfirmed == true && hasVoucher(request.resource.data)
-        )
-        || ((manager() || (advanceOfficer() && resource.data.ownerEmail == email())) && before.get('status', '') == 'pending' && (
-          adjustmentApproval()
-          || (after.status == 'cancelled' && refundAmountApproval())
-          || (after.status == 'rejected' && after.amount == before.amount
-            && after.requestedBy == before.requestedBy && after.reviewedBy == email()
-            && request.resource.data.amount == resource.data.amount)
-        ));
-    }
+
+
     function allocationFixed() {
       return request.resource.data.estimatedAmount == resource.data.estimatedAmount
         && request.resource.data.ownerEmail == resource.data.ownerEmail
@@ -284,18 +246,22 @@ service cloud.firestore {
         && request.resource.data.refundAmount > 0
         && request.resource.data.refundAmount <= resource.data.estimatedAmount;
     }
+    function confirmedRefundTotal(data) {
+      let total=data.get('refundConfirmedTotal',null);
+      return total is number ? total : (data.get('refundReceivedConfirmed',false)==true ? data.get('refundAmount',0) : 0);
+    }
     function teacherRefundReport() {
-      return enabledUser() && resource.data.ownerEmail == email()
-        && (resource.data.get('refundReported', false) == false || resource.data.get('refundReceivedConfirmed', false) == true)
+      return enabledUser() && (resource.data.ownerEmail == email() || manager())
+        && (resource.data.get('refundReported', false) != true || resource.data.get('refundReceivedConfirmed', false) == true)
         && request.resource.data.get('refundReceivedConfirmed', true) == false
-        && request.resource.data.get('refundConfirmedTotal', -1) == resource.data.get('refundConfirmedTotal', resource.data.get('refundReceivedConfirmed', false) == true ? resource.data.get('refundAmount', 0) : 0)
+        && request.resource.data.get('refundConfirmedTotal', -1) == confirmedRefundTotal(resource.data)
         && request.resource.data.refundAmount > request.resource.data.refundConfirmedTotal
         && request.resource.data.refundReported == true
         && request.resource.data.refundReportedBy == email()
         && request.resource.data.refundReportedAt == request.time
         && resource.data.get('allocationReceivedConfirmed', false) == true
-        && resource.data.get('deleted', false) == false
-        && resource.data.get('payoutSplit', false) == false
+        && resource.data.get('deleted', false) != true
+        && resource.data.get('payoutSplit', false) != true
         && request.resource.data.refundAmount is int
         && request.resource.data.refundAmount <= resource.data.estimatedAmount
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
@@ -307,7 +273,7 @@ service cloud.firestore {
       return teacherRefundReport()
         || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['refundReceivedConfirmed','refundReceivedBy','refundReceivedAt','refundConfirmedTotal','refundHistory'])
         || (refundReviewer(resource.data) && resource.data.get('refundReported', false) == true
-          && resource.data.get('refundReceivedConfirmed', false) == false
+          && resource.data.get('refundReceivedConfirmed', false) != true
           && request.resource.data.refundReceivedConfirmed == true
           && request.resource.data.refundReceivedBy == email()
           && request.resource.data.refundReceivedAt == request.time
@@ -318,8 +284,11 @@ service cloud.firestore {
 
     match /users/{userEmail} {
       allow read: if manager() || advanceOfficer()
-        || (enabledUser() && userEmail == email());
-      allow create, update, delete: if manager();
+        || (signedIn() && userEmail == email());
+      // The designated bootstrap account may repair only its own manager profile.
+      allow create, update: if manager() || (primaryManager() && userEmail == email()
+        && request.resource.data.enabled == true && request.resource.data.role == 'manager');
+      allow delete: if manager();
     }
 
     match /budgetPlans/{planId} {
@@ -338,7 +307,7 @@ service cloud.firestore {
       allow read: if enabledUser();
       allow create: if manager() || (ownBatch(request.resource.data)
         && request.resource.data.createdBy == email()
-        && request.resource.data.get('deleted', false) == false);
+        && request.resource.data.get('deleted', false) != true);
       allow update: if manager() || (ownBatch(resource.data) && ownBatch(request.resource.data)
         && request.resource.data.planId == resource.data.planId
         && request.resource.data.get('createdBy', null) == resource.data.get('createdBy', null)
@@ -349,76 +318,86 @@ service cloud.firestore {
 
     // Managers manage all allocations. Regular users may read only their own allocation
     // and may only confirm that the allocated amount was received.
-    match /advanceAllocations/{allocationId} {
-      // Initialize split payouts and validate later mutations with their linked payout.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients','updatedAt','updatedBy'])
-        && request.resource.data.updatedAt == request.time
-        && payoutParentChange(allocationId);
 
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceTopUpTotal']) && managerAdvanceTopUp()
+    function allocationTopUp(allocationId) {
+      return managerAdvanceTopUp()
         && getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.advanceAllocationId == allocationId
         && getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.advanceTopUpTotal == request.resource.data.advanceTopUpTotal;
+    }
+    function allocationReceive() {
+      return (resource.data.ownerEmail == email() || manager())
+        && resource.data.get('allocationReceivedConfirmed', false) != true
+        && resource.data.get('payoutSplit', false) != true
+        && request.resource.data.allocationReceivedConfirmed == true
+        && request.resource.data.allocationReceivedBy == email() && request.resource.data.allocationReceivedAt == request.time
+        && changed().hasOnly(['allocationReceivedConfirmed','allocationReceivedAt','allocationReceivedBy','updatedAt','updatedBy']);
+    }
+    function allocationRefundReceipt() {
+      return refundReviewer(resource.data) && allocationFixed() && refundReceiptProtected()
+        && changed().hasOnly(['refundConfirmedTotal','refundHistory','refundReceivedConfirmed','refundReceivedBy',
+          'refundReceivedAt','settlementAmount','updatedAt','updatedBy']);
+    }
+    function allocationRemove() {
+      let rid = resource.data.expenseRecordId;
+      return (manager() || ownAllocation(resource.data))
+        && resource.data.get('splitAssigned', 0) == 0 && request.resource.data.deleted == true
+        && request.resource.data.deletedBy == email() && request.resource.data.deletedAt == request.time
+        && changed().hasOnly(['deleted','deletedAt','deletedBy','updatedAt','updatedBy','orphanSourceRemoved'])
+        && (!exists(/databases/$(database)/documents/expenseRecords/$(rid))
+          || get(/databases/$(database)/documents/expenseRecords/$(rid)).data.get('deleted', false)
+          || getAfter(/databases/$(database)/documents/expenseRecords/$(rid)).data.get('advanceAllocationId', '') == '');
+    }
+    function allocationAdjustmentSettlement() {
+      let before=get(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data;
+      let after=getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data;
+      return manager() && changed().hasOnly(['settlementAmount','updatedAt','updatedBy'])
+        && before.get('actualAdjustment',{}).get('status','') == 'pending'
+        && after.actualAdjustment.status == 'approved'
+        && after.actualAdjustment.reviewedBy == email()
+        && after.amount == before.actualAdjustment.amount
+        && request.resource.data.settlementAmount == after.amount;
+    }
+    function allocationUpdate(allocationId) {
+      let k = changed();
+      return resource.data.get('deleted', false) != true && (
+        k.hasAny(['payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitMutationId','splitRecipients']) ? payoutParentChange(allocationId)
+        : k.hasAny(['advanceTopUpTotal']) ? allocationTopUp(allocationId)
+        : k.hasAny(['refundReported','refundAmount','refundReportedAt','refundReportedBy']) ? teacherRefundReport()
+        : k.hasAny(['refundReceivedConfirmed','refundConfirmedTotal','refundHistory']) ? allocationRefundReceipt()
+        : k.hasAny(['allocationReceivedConfirmed','allocationReceivedBy','allocationReceivedAt']) ? allocationReceive()
+        : k.hasAny(['deleted']) ? allocationRemove()
+        : k.hasAny(['settlementAmount']) ? allocationAdjustmentSettlement()
+        : manager() && k.hasOnly(['note','updatedAt','updatedBy'])
+      );
+    }
 
+    match /advanceAllocations/{allocationId} {
       allow read: if manager()
         || (enabledUser() && resource.data.ownerEmail == email())
         || (advanceOfficer() && ownBatch(get(/databases/$(database)/documents/advanceBatches/$(resource.data.batchId)).data))
         || (enabledUser() && resource.data.get('splitRecipients',{}).get(email(),false)==true);
-
       allow create: if manager() || (ownAllocation(request.resource.data)
         && request.resource.data.keys().hasOnly(['planId','batchId','expenseRecordId','categoryId','categoryName','ownerEmail','ownerName','purpose','estimatedAmount','note','recordOrigin','deleted','createdAt','createdBy','updatedAt','updatedBy'])
         && request.resource.data.createdBy == email()
-        && request.resource.data.get('deleted', false) == false
-        && request.resource.data.get('allocationReceivedConfirmed', false) == false
-        && request.resource.data.get('refundReported', false) == false
-        && request.resource.data.get('refundReceivedConfirmed', false) == false
+        && request.resource.data.get('deleted', false) != true
+        && request.resource.data.get('allocationReceivedConfirmed', false) != true
+        && request.resource.data.get('refundReported', false) != true
+        && request.resource.data.get('refundReceivedConfirmed', false) != true
         && request.resource.data.get('refundConfirmedTotal', 0) == 0
         && request.resource.data.get('refundAmount', 0) == 0
         && request.resource.data.get('refundHistory', {}) == {}
         && request.resource.data.estimatedAmount > 0
         && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.ownerEmail == email()
-        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.get('advanceAllocationId', '') == ''
+        && !linked(get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data)
         && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.estimated == true
-        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.get('deleted', false) == false
+        && get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.get('deleted', false) != true
         && request.resource.data.planId == get(/databases/$(database)/documents/advanceBatches/$(request.resource.data.batchId)).data.planId
         && request.resource.data.planId == get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.planId
         && request.resource.data.categoryId == get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.categoryId
         && request.resource.data.estimatedAmount == get(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.amount
         && getAfter(/databases/$(database)/documents/expenseRecords/$(request.resource.data.expenseRecordId)).data.advanceAllocationId == allocationId);
+      allow update: if enabledUser() && stamped() && allocationUpdate(allocationId);
       allow delete: if manager();
-
-      allow update: if !request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceTopUpTotal','splitRefundTotal']) && allocationFixed() && refundReceiptProtected()
-        && (request.resource.data.get('deleted',false)!=true || resource.data.get('splitAssigned',0)==0) && (
-        (request.resource.data.get('payoutSplit',false)==true && payoutParentChange(allocationId)) ||
-        manager()
-        || teacherRefundReport()
-        || (ownAllocation(resource.data)
-          && request.resource.data.get('deleted', false) == true
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted','deletedAt','deletedBy','updatedAt','updatedBy','orphanSourceRemoved'])
-          && request.resource.data.deletedBy == email()
-          && (!exists(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId))
-            || get(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.get('deleted', false) == true
-            || getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.get('advanceAllocationId', '') == ''))
-        || (advanceOfficer() && resource.data.ownerEmail == email()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundConfirmedTotal','refundHistory','refundReceivedConfirmed','refundReceivedBy','refundReceivedAt','settlementAmount','updatedAt','updatedBy'])
-          && resource.data.get('refundReceivedConfirmed', false) == false
-          && request.resource.data.refundReceivedConfirmed == true)
-        || (
-          enabledUser()
-          && resource.data.ownerEmail == email()
-          && resource.data.get('allocationReceivedConfirmed', false) == false
-          && resource.data.get('payoutSplit',false)==false
-          && request.resource.data.ownerEmail == resource.data.ownerEmail
-          && request.resource.data.get('allocationReceivedConfirmed', false) == true
-          && request.resource.data.get('allocationReceivedBy', '') == email()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'allocationReceivedConfirmed',
-            'allocationReceivedAt',
-            'allocationReceivedBy',
-            'updatedAt',
-            'updatedBy'
-          ])
-        ));
     }
 
     // Reminder configuration and reminder history are manager-only.
@@ -431,13 +410,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    function accountingVoucherChangeAllowed() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accountingVoucherAmount','advanceTopUpTotal','accountingOwnerEmail','accountingOwnerName']);
-    }
+
 
     function managerAdvanceTopUp() {
       return enabledUser() && manager()
-        && resource.data.get('deleted', false) == false
+        && resource.data.get('deleted', false) != true
         && request.resource.data.advanceTopUpTotal is int
         && request.resource.data.advanceTopUpTotal > resource.data.get('advanceTopUpTotal', 0)
         && request.resource.data.advanceTopUpTotal <= 9007199254740991
@@ -452,12 +429,12 @@ service cloud.firestore {
       let allocationPath = /databases/$(database)/documents/advanceAllocations/$(allocationId);
       let allocation = getAfter(allocationPath).data;
       let batch = get(/databases/$(database)/documents/advanceBatches/$(next.advanceBatchId)).data;
-      let categoryIds = batch.get('categoryIds', []);
+      let categoryIds = batch.get('categoryIds', []) is list ? batch.get('categoryIds', []) : [];
       return allocationId != ''
         && !exists(allocationPath)
         && !linked(resource.data)
         && !recordLocked()
-        && resource.data.get('deleted', false) == false
+        && resource.data.get('deleted', false) != true
         && resource.data.get('estimated', false) == true
         && (manager() || (ownBatch(batch) && resource.data.ownerEmail == email()))
         && batch.get('deleted', false) == false
@@ -475,7 +452,7 @@ service cloud.firestore {
         && allocation.recordOrigin == 'existing-estimate'
         && allocation.get('deleted', false) == false
         && next.advanceLinked == true
-        && next.originalEstimatedAmount == resource.data.get('originalEstimatedAmount', resource.data.amount)
+        && next.originalEstimatedAmount == (resource.data.get('originalEstimatedAmount', null) == null ? resource.data.amount : resource.data.originalEstimatedAmount)
         && next.updatedAt == request.time
         && next.updatedBy == email()
         && next.diff(resource.data).affectedKeys().hasOnly([
@@ -495,13 +472,12 @@ service cloud.firestore {
         && data.get('reimbursementNo', '').size() <= 80;
     }
 
-    match /expenseRecords/{recordId} {
-      // Confirm an actual refund and synchronize only the linked expense balance.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount'])
+    function expenseRefund() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount','refundAdjustment','actualAdjustment','updatedAt','updatedBy'])
         && enabledUser()
         && linked(resource.data)
-        && resource.data.get('deleted', false) == false
+        && resource.data.get('deleted', false) != true
         && request.resource.data.updatedAt == request.time
         && request.resource.data.updatedBy == email()
         && request.resource.data.amount >= 0
@@ -524,23 +500,22 @@ service cloud.firestore {
             && request.resource.data.refundAdjustment.confirmedBy == email()
             && request.resource.data.refundAdjustment.confirmedAt == request.time)
         );
+    }
 
-
-      // All ordinary expense-form saves share one bounded path, including reused vouchers.
-      // Allocation, ownership, manager waiver and audit fields cannot change here.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+    function expenseForm() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
           'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
           'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
           'voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
         ])
         && enabledUser() && (resource.data.ownerEmail == email() || manager())
-        && resource.data.get('deleted', false) == false && !recordLocked()
+        && resource.data.get('deleted', false) != true && !recordLocked()
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && request.resource.data.amount is number && request.resource.data.amount >= 0
         && validExpenseNumbers(request.resource.data)
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false
+        && request.resource.data.get('reviewed', false) != true
+        && request.resource.data.get('locked', false) != true
         && (
           (request.resource.data.estimated == true
             && request.resource.data.reviewStatus == 'estimated'
@@ -556,12 +531,13 @@ service cloud.firestore {
           && request.resource.data.semester == resource.data.semester
           && (resource.data.get('estimated', false) == true || request.resource.data.estimated == false)
         ));
+    }
 
-      // Corrections leave the owner, evidence, and review lifecycle intact.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+    function expenseCorrection() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy'
         ]) && (manager() || (enabledUser() && resource.data.ownerEmail == email()))
-        && resource.data.get('deleted', false) == false && !recordLocked()
+        && resource.data.get('deleted', false) != true && !recordLocked()
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && validExpenseNumbers(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -569,12 +545,11 @@ service cloud.firestore {
         ])
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['amount'])
           || (!linked(resource.data) && request.resource.data.amount is number && request.resource.data.amount >= 0));
+    }
 
-
-      // Managers review or reopen any active expense without changing its owner,
-      // financial fields, voucher, or advance allocation.
-      allow update: if manager()
-        && resource.data.get('deleted', false) == false
+    function expenseReview() {
+      return manager()
+        && resource.data.get('deleted', false) != true
         && resource.data.get('estimated', false) != true
         && request.resource.data.updatedBy == email()
         && request.resource.data.updatedAt == request.time
@@ -603,14 +578,13 @@ service cloud.firestore {
             ])
           )
         );
+    }
 
-
-
-      // No-voucher requests are submissions, not manager approvals.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['voucherNotRequiredRequestedAt','voucherNotRequiredRequestedBy'])
+    function expenseWaiverRequest() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['voucherNotRequiredRequestedAt','voucherNotRequiredRequestedBy'])
         && request.resource.data.get('voucherNotRequiredRequested', false) == true
         && enabledUser() && (resource.data.ownerEmail == email() || manager())
-        && !recordLocked() && resource.data.get('deleted', false) == false
+        && !recordLocked() && resource.data.get('deleted', false) != true
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && request.resource.data.voucherNotRequiredRequestedBy == email()
         && request.resource.data.voucherNotRequiredRequestedAt == request.time
@@ -631,12 +605,13 @@ service cloud.firestore {
           && request.resource.data.categoryId == resource.data.categoryId
           && request.resource.data.semester == resource.data.semester
         ));
+    }
 
-      // Manager waiver confirmation changes only waiver fields, never money or ownership.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny([
+    function expenseWaiver() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'voucherWaiverManagerConfirmed','voucherNotRequired','voucherRequirementWaived','amountConfirmedByManagerWaiver'
         ])
-        && manager() && resource.data.get('deleted', false) == false
+        && manager() && resource.data.get('deleted', false) != true
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'voucherWaiverManagerConfirmed','voucherWaiverManagerConfirmedBy','voucherWaiverManagerConfirmedAt',
@@ -659,51 +634,11 @@ service cloud.firestore {
             && request.resource.data.amountConfirmed == false
             && request.resource.data.amountConfirmedByManagerWaiver == false)
         );
+    }
 
-
-      // Attachment saves must be evaluated before unrelated advance/refund rules.
-      // Only the saved owner may use this path; audit and allocation fields stay unchanged.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'voucherUrl','voucherPath','voucherStoragePath','voucherFileName','voucherFileSize','voucherFileType'
-        ])
-        && enabledUser() && resource.data.ownerEmail == email()
-        && resource.data.get('deleted', false) == false && !recordLocked()
-        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
-        && request.resource.data.amount is number && request.resource.data.amount >= 0
-        && validExpenseNumbers(request.resource.data)
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false
-        && (
-          (request.resource.data.estimated == true
-            && resource.data.get('estimated', false) == true
-            && request.resource.data.reviewStatus == 'estimated'
-            && request.resource.data.get('estimateStage', 'estimated') in ['estimated','purchasing','reimbursing'])
-          || (request.resource.data.estimated == false
-            && request.resource.data.reviewStatus == 'pending'
-            && request.resource.data.get('estimateStage', '') == ''
-            && request.resource.data.archived == true
-            && request.resource.data.amountConfirmed == true
-            && hasVoucher(request.resource.data))
-        )
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
-          'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
-          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
-          'voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
-        ])
-        && (!linked(resource.data) || (
-          request.resource.data.amount == resource.data.amount
-          && request.resource.data.categoryId == resource.data.categoryId
-          && request.resource.data.semester == resource.data.semester
-        ));
-
-      // Route linking before unrelated edit/review checks to stay within the evaluation limit.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceAllocationId'])
-        && enabledUser() && linkExistingEstimate(recordId);
-
-      // Remove the attachment reference only; a teacher cannot purge storage files.
-      allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
-        && !recordLocked() && resource.data.get('deleted', false) == false
+    function expenseDetach() {
+      return (manager() || (enabledUser() && resource.data.ownerEmail == email()))
+        && !recordLocked() && resource.data.get('deleted', false) != true
         && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
         && request.resource.data.voucherUrl == '' && request.resource.data.folderUrl == ''
         && request.resource.data.voucherPath == '' && request.resource.data.voucherStoragePath == ''
@@ -714,33 +649,11 @@ service cloud.firestore {
           'voucherUrl','folderUrl','voucherPath','voucherStoragePath','voucherFileName',
           'voucherFileType','voucherFileSize','archived','amountConfirmed','amountManuallyConfirmed','updatedAt','updatedBy'
         ]);
+    }
 
-      allow update: if (manager() || (enabledUser() && resource.data.ownerEmail == email()))
-        && !recordLocked() && resource.data.get('deleted', false) == false
-        && validExpenseNumbers(request.resource.data)
-        && request.resource.data.updatedBy == email() && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
-        ]);
-
-      // Direct amount correction for an active expense without an advance allocation.
-      // The manager may correct their own expense or one belonging to another teacher.
-      // Owner permission is based on the saved record, never on an incoming owner field.
-      allow update: if (manager() || (enabledUser()
-          && resource.data.ownerEmail == email()
-          && submissionComplete(request.resource.data)))
-        && !recordLocked() && !linked(resource.data)
-        && resource.data.get('deleted', false) == false
-        && request.resource.data.amount is number
-        && request.resource.data.amount >= 0
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'amount','updatedAt','updatedBy'
-        ]);
-
-      allow update: if enabledUser() && manager() && linked(resource.data)
-        && !recordLocked() && resource.data.get('deleted',false) == false
+    function expenseAccountingOwner() {
+      return enabledUser() && manager() && linked(resource.data)
+        && !recordLocked() && resource.data.get('deleted',false) != true
         && request.resource.data.accountingOwnerEmail is string
         && request.resource.data.accountingOwnerName is string
         && eligibleExpenseOwner(request.resource.data.accountingOwnerEmail)
@@ -749,10 +662,12 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'accountingOwnerEmail','accountingOwnerName','updatedAt','updatedBy'
         ]);
+    }
 
-      allow update: if enabledUser() && manager()
+    function expenseOwner() {
+      return enabledUser() && manager()
         && !recordLocked() && !linked(resource.data)
-        && resource.data.get('deleted', false) == false
+        && resource.data.get('deleted', false) != true
         && request.resource.data.ownerEmail is string
         && request.resource.data.ownerName is string
         && request.resource.data.ownerEmail != resource.data.get('accountingOwnerEmail', resource.data.ownerEmail)
@@ -764,12 +679,13 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'ownerEmail','ownerName','accountingOwnerEmail','accountingOwnerName','updatedAt','updatedBy'
         ]);
+    }
 
-      // Moving an unlocked, unallocated record to the recycle bin does not edit its financial fields.
-      allow update: if enabledUser()
+    function expenseRecycle() {
+      return enabledUser()
         && (manager() || resource.data.ownerEmail == email())
         && !recordLocked() && !linked(resource.data)
-        && resource.data.get('deleted', false) == false
+        && resource.data.get('deleted', false) != true
         && request.resource.data.deleted == true
         && request.resource.data.deletedBy == email()
         && request.resource.data.deletedAt == request.time
@@ -778,20 +694,104 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'deleted','deletedAt','deletedBy','updatedAt','updatedBy'
         ]);
+    }
 
-
-
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceTopUpTotal']) && managerAdvanceTopUp() && linked(resource.data)
+    function expenseTopUp(recordId) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['advanceTopUpTotal']) && managerAdvanceTopUp() && linked(resource.data)
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.expenseRecordId == recordId
         && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.advanceTopUpTotal == request.resource.data.advanceTopUpTotal;
+    }
 
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function stamped() {
+      return request.resource.data.updatedAt == request.time && request.resource.data.updatedBy == email();
+    }
+    function expenseRestore() {
+      return manager() && resource.data.get('deleted', false) == true
+        && request.resource.data.deleted == false && !linked(resource.data)
+        && request.resource.data.restoredBy == email() && request.resource.data.restoredAt == request.time
+        && request.resource.data.deletedAt == null && request.resource.data.deletedBy == null
+        && changed().hasOnly(['deleted','deletedAt','deletedBy','restoredAt','restoredBy','updatedAt','updatedBy']);
+    }
+    function expensePurge() {
+      return manager() && request.resource.data.voucherPurged == true
+        && request.resource.data.voucherPurgedAt == request.time && request.resource.data.voucherPurgedBy == email()
+        && !hasVoucher(request.resource.data) && request.resource.data.voucherPath == ''
+        && request.resource.data.voucherStoragePath == '' && request.resource.data.archived == false
+        && changed().hasOnly(['voucherPurged','voucherPurgedAt','voucherPurgedBy','voucherPurgedOriginalPath',
+          'voucherPurgedOriginalName','voucherPurgedAction','voucherUrl','folderUrl','voucherPath','voucherStoragePath',
+          'archived','updatedAt','updatedBy']);
+    }
+    function expenseUnlink() {
+      return linked(resource.data) && allocationCancellation()
+        && request.resource.data.get('advanceBatchId', '') == '' && request.resource.data.advanceLinked == false
+        && changed().hasOnly(['advanceAllocationId','advanceBatchId','advanceLinked','updatedAt','updatedBy']);
+    }
+    function expenseAdjustment() {
+      let before=resource.data.get('actualAdjustment',{});
+      let after=request.resource.data.get('actualAdjustment',{});
+      return (manager() || resource.data.ownerEmail == email()) && !recordLocked()
+        && resource.data.get('deleted', false) != true && linked(resource.data)
+        && (!changed().hasAny(['actualAdjustmentHistory']) || manager())
+        && changed().hasOnly(['amount','estimated','estimateStage','archived','amountConfirmed','amountManuallyConfirmed',
+          'reviewStatus','reviewed','locked','actualAdjustment','actualAdjustmentHistory',
+          'voucherUrl','voucherPath','voucherStoragePath','voucherFileName','voucherFileSize','voucherFileType','updatedAt','updatedBy'])
+        && request.resource.data.get('reviewed',false) != true && request.resource.data.get('locked',false) != true
+        && request.resource.data.get('reviewStatus','') != 'approved'
+        && (after.get('status','') == 'pending' ? (
+          before.get('status','') in ['', 'rejected']
+          && after.keys().hasOnly(['status','amount','reason','requestedBy','requestedAt'])
+          && after.amount is number && after.amount >= 0
+          && after.amount <= get(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.estimatedAmount
+          && after.reason is string && after.reason.size() > 0 && after.reason.size() <= 300
+          && after.requestedBy == email() && after.requestedAt == request.time
+          && request.resource.data.amount == resource.data.amount
+          && request.resource.data.estimated == true && amountConfirmed(request.resource.data) && hasVoucher(request.resource.data)
+        ) : (
+          before.get('status','') == 'pending'
+          && after.diff(before).affectedKeys().hasOnly(['status','reviewedBy','reviewedAt'])
+          && after.reviewedBy == email() && after.reviewedAt == request.time
+          && (after.status == 'approved' ? (
+            manager() && request.resource.data.amount == before.amount && request.resource.data.estimated == false
+            && getAfter(/databases/$(database)/documents/advanceAllocations/$(resource.data.advanceAllocationId)).data.settlementAmount == before.amount
+          ) : (
+            after.status == 'rejected' && (manager() || (advanceOfficer() && resource.data.ownerEmail == email()))
+            && request.resource.data.amount == resource.data.amount
+          ))
+        ));
+    }
+    // Exactly one route is evaluated. Unrelated operations cannot spend this request's rules budget.
+    function expenseUpdate(recordId) {
+      let k = changed();
+      return k.hasAny(['advanceAllocationId']) ?
+          (linked(request.resource.data) ? linkExistingEstimate(recordId) : expenseUnlink())
+        : k.hasAny(['advanceTopUpTotal']) ? expenseTopUp(recordId)
+        : k.hasAny(['accountingOwnerEmail','accountingOwnerName','ownerEmail']) ?
+          (linked(resource.data) ? expenseAccountingOwner() : expenseOwner())
+        : k.hasAny(['voucherNotRequired','voucherRequirementWaived','amountConfirmedByManagerWaiver',
+            'voucherWaiverManagerConfirmed','voucherWaiverManagerConfirmedAt','voucherWaiverManagerConfirmedBy']) ? expenseWaiver()
+        : k.hasAny(['deleted','restoredAt','restoredBy']) ?
+          (request.resource.data.get('deleted', false) ? expenseRecycle() : expenseRestore())
+        : k.hasAny(['voucherPurged','voucherPurgedAt','voucherPurgedBy']) ? expensePurge()
+        : k.hasAny(['reviewedAt','reviewedBy','unlockedAt','unlockedBy'])
+            || (k.hasAny(['reviewStatus','locked','reviewed']) && (request.resource.data.get('reviewStatus', '') == 'approved'
+            || request.resource.data.get('locked', false) || request.resource.data.get('reviewed', false))) ? expenseReview()
+        : k.hasAny(['refundAdjustment']) ? expenseRefund()
+        : k.hasAny(['actualAdjustment','actualAdjustmentHistory']) ? expenseAdjustment()
+        : linked(resource.data) && k.hasAny(['amount']) ? expenseRefund()
+        : k.hasAny(['voucherNotRequiredRequested','voucherNotRequiredRequestedAt','voucherNotRequiredRequestedBy']) ? expenseWaiverRequest()
+        : k.hasOnly(['purpose','note','purchaseOrderNo','reimbursementNo','amount','updatedAt','updatedBy']) ? expenseCorrection()
+        : k.hasAny(['folderUrl','amountManuallyConfirmed']) && !hasVoucher(request.resource.data) ? expenseDetach()
+        : expenseForm();
+    }
+
+    match /expenseRecords/{recordId} {
       allow read: if enabledUser();
-
       allow create: if enabledUser()
         && !request.resource.data.keys().hasAny(['accountingVoucherAmount','advanceTopUpTotal','accountingOwnerEmail','accountingOwnerName'])
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false
+        && request.resource.data.get('reviewed', false) != true
+        && request.resource.data.get('locked', false) != true
         && (
           (
             manager()
@@ -806,136 +806,7 @@ service cloud.firestore {
             && submissionComplete(request.resource.data)
           )
         );
-
-      // Save an accounting comparison amount before the voucher is ready.
-      allow update: if enabledUser()
-        && (manager() || resource.data.ownerEmail == email())
-        && resource.data.get('deleted', false) == false
-        && !recordLocked()
-        && linked(resource.data)
-        && resource.data.get('estimated', false) == true
-        && request.resource.data.estimated == true
-        && request.resource.data.reviewStatus == 'estimated'
-        && request.resource.data.get('estimateStage', 'estimated') in ['estimated', 'purchasing', 'reimbursing']
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && accountingVoucherChangeAllowed()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'purpose','note','ownerName','estimateStage','hanlongAdvance','archived',
-          'amountConfirmed','reviewStatus','reviewed','locked','accountingVoucherAmount',
-          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
-          'voucherFileSize','voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
-        ]);
-
-      // Managers can attach a confirmed voucher on behalf of the record owner.
-      // Keep the expense amount, owner and advance allocation intact.
-      allow update: if enabledUser() && accountingVoucherChangeAllowed() && manager()
-        && resource.data.get('deleted', false) == false
-        && !recordLocked()
-        && request.resource.data.estimated == false
-        && request.resource.data.get('estimateStage', '') == ''
-        && request.resource.data.reviewStatus == 'pending'
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false
-        && request.resource.data.archived == true
-        && request.resource.data.amountConfirmed == true
-        && request.resource.data.get('voucherUrl', '') != ''
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'estimated','estimateStage','hanlongAdvance','archived','amountConfirmed',
-          'reviewStatus','reviewed','locked','note','ownerName',
-          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl',
-          'voucherFileSize','voucherFileType','purchaseOrderNo','reimbursementNo','accountingVoucherAmount','updatedAt','updatedBy'
-        ]);
-
-      // An owner can edit an unallocated expense while it remains in an estimate stage.
-      // A stale form cannot overwrite an amount after the record is allocated.
-      allow update: if enabledUser()
-        && resource.data.ownerEmail == email()
-        && resource.data.get('deleted', false) == false
-        && !recordLocked()
-        && !linked(resource.data)
-        && resource.data.get('estimated', false) == true
-        && request.resource.data.estimated == true
-        && request.resource.data.get('estimateStage', 'estimated') in ['estimated', 'purchasing', 'reimbursing']
-        && request.resource.data.amount is number
-        && request.resource.data.amount >= 0
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'categoryId','purpose','amount','semester','estimateStage','hanlongAdvance',
-          'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
-          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
-          'voucherFileType','purchaseOrderNo','reimbursementNo','updatedAt','updatedBy'
-        ])
-        && request.resource.data.get('reviewStatus', 'estimated') == 'estimated'
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false;
-
-      // An owner can submit an estimated expense for review with a confirmed voucher.
-      // Limit this transition to expense-form fields; allocation and audit fields remain protected.
-      allow update: if enabledUser() && accountingVoucherChangeAllowed()
-        && resource.data.ownerEmail == email()
-        && resource.data.get('deleted', false) == false
-        && !recordLocked()
-        && resource.data.get('estimated', false) == true
-        && request.resource.data.estimated == false
-        && request.resource.data.get('estimateStage', '') == ''
-        && request.resource.data.reviewStatus == 'pending'
-        && request.resource.data.get('reviewed', false) == false
-        && request.resource.data.get('locked', false) == false
-        && request.resource.data.archived == true
-        && request.resource.data.amountConfirmed == true
-        && hasVoucher(request.resource.data)
-        && request.resource.data.amount is number
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'categoryId','purpose','amount','semester','estimated','estimateStage','hanlongAdvance',
-          'archived','amountConfirmed','reviewStatus','reviewed','locked','note','ownerName',
-          'voucherFileName','voucherPath','voucherStoragePath','voucherUrl','voucherFileSize',
-          'voucherFileType','purchaseOrderNo','reimbursementNo','accountingVoucherAmount','updatedAt','updatedBy'
-        ])
-        && (!linked(resource.data) || (
-          request.resource.data.amount == resource.data.amount
-          && request.resource.data.categoryId == resource.data.categoryId
-          && request.resource.data.semester == resource.data.semester
-        ));
-
-      // Owners may toggle only the advance marker on an unlocked estimated record.
-      allow update: if enabledUser()
-        && resource.data.ownerEmail == email()
-        && resource.data.get('estimated', false) == true
-        && resource.data.get('deleted', false) == false
-        && !recordLocked()
-        && request.resource.data.hanlongAdvance is bool
-        && request.resource.data.hanlongAdvance != resource.data.get('hanlongAdvance', false)
-        && request.resource.data.updatedBy == email()
-        && request.resource.data.updatedAt == request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hanlongAdvance','updatedAt','updatedBy']);
-
-      allow update: if enabledUser() && accountingVoucherChangeAllowed() && linkedRecordProtected() && adjustmentProtected()
-        && (manager() || ownRecordServiceUpdate() || (linked(resource.data) && payoutExpenseRefund()) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['actualAdjustmentHistory', 'refundAdjustment'])) && (
-        ownRecordServiceUpdate() || (linked(resource.data) && payoutExpenseRefund()) ||
-        manager()
-        || (
-          resource.data.ownerEmail == email()
-          && !recordLocked()
-          && request.resource.data.ownerEmail == resource.data.ownerEmail
-          && request.resource.data.createdBy == resource.data.createdBy
-          && request.resource.data.get('reviewStatus', 'pending') != 'approved'
-          && request.resource.data.get('reviewed', false) == false
-          && request.resource.data.get('locked', false) == false
-          && request.resource.data.get('voucherNotRequired', false) == resource.data.get('voucherNotRequired', false)
-          && request.resource.data.get('voucherRequirementWaived', false) == resource.data.get('voucherRequirementWaived', false)
-          && request.resource.data.get('amountConfirmedByManagerWaiver', false) == resource.data.get('amountConfirmedByManagerWaiver', false)
-          && submissionComplete(request.resource.data)
-        )
-      );
-
+      allow update: if enabledUser() && stamped() && expenseUpdate(recordId);
       allow delete: if enabledUser() && !linked(resource.data) && (
         manager()
         || (
