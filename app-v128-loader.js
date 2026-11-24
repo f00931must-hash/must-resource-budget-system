@@ -2,7 +2,7 @@
 // Keeps stable app-v120 behavior, routes vouchers private, converts data deletion to 10-day soft delete,
 // and renders the manager no-voucher action directly with each record card.
 
-const SOURCE_URL = "./app-v120.js?v=permissions-20261120";
+const SOURCE_URL = "./app-v120.js?v=installments-20261124";
 
 async function loadBudgetApp(){
   const res = await fetch(SOURCE_URL, {cache:"no-store"});
@@ -33,12 +33,12 @@ async function loadBudgetApp(){
   );
 
   const oldIssues = `const issues=(r.estimated!==true && !evidenceUrl?'<span class="status danger-badge">缺單據</span>':'')+\n      (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true?'<span class="status danger-badge">未確認金額</span>':'');`;
-  const newIssues = `const managerWaiverDone=r.amountConfirmedByManagerWaiver===true;\n    const issues=(r.estimated!==true && !evidenceUrl && !managerWaiverDone?'<span class="status danger-badge">缺單據</span>':'')+\n      (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true && !managerWaiverDone?'<span class="status danger-badge">未確認金額</span>':'');`;
+  const newIssues = `const managerWaiverDone=r.amountConfirmedByManagerWaiver===true || isInstallment(r);\n    const issues=(r.estimated!==true && !evidenceUrl && !managerWaiverDone?'<span class="status danger-badge">缺單據</span>':'')+\n      (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true && !managerWaiverDone?'<span class="status danger-badge">未確認金額</span>':'');`;
   if(!source.includes(oldIssues)) throw new Error("找不到使用紀錄狀態產生位置，已停止載入以避免免附單據狀態錯誤。");
   source = source.replace(oldIssues,newIssues);
 
   const oldApproveAction = 'if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;';
-  const newApproveAction = `if(isManager() && !r.estimated && !approved){\n      const managerWaiverDone=r.amountConfirmedByManagerWaiver===true;\n      if(!evidenceUrl && !managerWaiverDone) actions+=\`<button class="link-btn" data-manager-waive-voucher="\${r.id}">免附單據</button>\`;\n      actions+=\`<button class="link-btn approve" data-approve-record="\${r.id}">核對完成</button>\`;\n    }`;
+  const newApproveAction = `if(!isInstallment(r) && isManager() && !r.estimated && !approved){\n      const managerWaiverDone=r.amountConfirmedByManagerWaiver===true;\n      if(!evidenceUrl && !managerWaiverDone) actions+=\`<button class="link-btn" data-manager-waive-voucher="\${r.id}">免附單據</button>\`;\n      actions+=\`<button class="link-btn approve" data-approve-record="\${r.id}">核對完成</button>\`;\n    }`;
   if(!source.includes(oldApproveAction)) throw new Error("找不到管理員核對按鈕產生位置，已停止載入以避免免附單據流程失效。");
   source = source.replace(oldApproveAction, newApproveAction);
 
@@ -68,6 +68,7 @@ function openNewRecord`);
   const r=state.records.find(x=>x.id===id); if(!r)return;
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager()&&r.ownerEmail!==state.user.email.toLowerCase())return toast("只能刪除自己建立的使用紀錄");
+  if(r.installment?.everUsed)return toast("已有分次核銷歷程，請以結案保留紀錄");
   if(r.advanceAllocationId)return toast("此筆已連結預支，請先到預支／動支處理分配，再移到回收桶。",8000);
   if(!confirm(\`確定將「\${r.purpose||"此筆"}」移到回收桶？\\n金額：\${money.format(r.amount||0)}\\n\\n10 天內可由管理員還原；附件不會因此刪除。\`))return;
   try{

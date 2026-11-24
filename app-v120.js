@@ -1,3 +1,5 @@
+const {isInstallment,occupiedAmount,reconciliationParts,installmentRows,installmentBuckets}=await import(new URL('./budget-installments-core.mjs?v=20261124-1',location.href).href);
+const {installInstallments}=await import(new URL('./budget-installments-ui.mjs?v=20261124-1',location.href).href);
 const {isBudgetManager} = await import(new URL("./budget-permissions.mjs", location.href).href);
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -90,7 +92,7 @@ $("budgetReconciliationBtn")?.addEventListener("click", async event=>{
         ));
         if(!valid())throw new Error("計畫或登入帳號已變更。");
         const names=new Map(categories.docs.map(d=>[d.id,d.data().name]));
-        return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).map(r=>({
+        return records.docs.map(d=>d.data()).filter(r=>r.deleted!==true).flatMap(reconciliationParts).map(r=>({
           name:r.purpose, category:names.get(r.categoryId)||r.categoryName||"未分類",
           amount:accountingAmount(r), stage:recordStageText(r), semester:r.semester, note:r.note,
           applicant:responsibleExpenseName(r),
@@ -193,12 +195,12 @@ function currentPlan(){ return state.plans.find(p=>p.id===state.activePlanId); }
 function isPlanActive(){ return currentPlan()?.active !== false; }
 function planTotal(){ return Number(currentPlan()?.totalBudget||0); }
 function allocatedTotal(){ return state.categories.reduce((s,c)=>s+Number(c.budget||0),0); }
-function isApproved(r){ return r.estimated!==true && (r.reviewStatus==="approved" || r.reviewed===true); }
+function isApproved(r){ if(isInstallment(r))return r.installment.closed; return r.estimated!==true && (r.reviewStatus==="approved" || r.reviewed===true); }
 function isPending(r){ return r.estimated!==true && !isApproved(r); }
-function accountingAmount(r){ return Number(r.amount||0)+Number(r.advanceTopUpTotal||0); }
-function approvedTotal(records=state.records){ return records.filter(isApproved).reduce((s,r)=>s+accountingAmount(r),0); }
-function pendingTotal(records=state.records){ return records.filter(isPending).reduce((s,r)=>s+accountingAmount(r),0); }
-function estimatedTotal(records=state.records){ return records.filter(r=>r.estimated===true).reduce((s,r)=>s+accountingAmount(r),0); }
+function accountingAmount(r){ return occupiedAmount(r); }
+function approvedTotal(records=state.records){ return records.reduce((s,r)=>s+(isInstallment(r)?installmentBuckets(r).approved:isApproved(r)?accountingAmount(r):0),0); }
+function pendingTotal(records=state.records){ return records.reduce((s,r)=>s+(isInstallment(r)?installmentBuckets(r).pending:isPending(r)?accountingAmount(r):0),0); }
+function estimatedTotal(records=state.records){ return records.reduce((s,r)=>s+(isInstallment(r)?installmentBuckets(r).reserved:r.estimated===true?accountingAmount(r):0),0); }
 function reservedTotal(records=state.records){ return records.reduce((s,r)=>s+accountingAmount(r),0); }
 function tsMillis(v){
   if(!v) return 0;
@@ -415,7 +417,7 @@ function filteredRecords(){
   if(semester) rows=rows.filter(r=>String(r.semester||"")===semester);
   if(review==="approved") rows=rows.filter(isApproved);
   if(review==="pending") rows=rows.filter(isPending);
-  if(review==="estimated") rows=rows.filter(r=>r.estimated===true);
+  if(review==="estimated") rows=rows.filter(r=>r.estimated===true&&!isApproved(r));
   if(issue==="missingVoucher") rows=rows.filter(r=>r.estimated!==true && !(r.voucherUrl||r.folderUrl));
   if(issue==="unconfirmed") rows=rows.filter(r=>r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true);
   if(term) rows=rows.filter(r=>[r.purpose,r.semester].some(v=>String(v||"").toLowerCase().includes(term)));
@@ -438,16 +440,16 @@ function renderRecords(){
     const approved=isApproved(r);
     const canEdit=!approved && (isManager()||mine);
     const evidenceUrl=r.voucherUrl||r.folderUrl||"";
-    const statusBadge=r.estimated===true
+    const statusBadge=isInstallment(r)?`<span class="status ${r.installment.closed?"done":"estimated"}">${r.installment.closed?"已結案":"分次核銷中"}</span>`:r.estimated===true
       ? '<span class="status estimated">預估</span>'
       : approved ? '<span class="status done">已核銷・已鎖定</span>' : '<span class="status pending">待管理員核對</span>';
     const issues=(r.estimated!==true && !evidenceUrl?'<span class="status danger-badge">缺單據</span>':'')+
       (r.estimated!==true && r.amountConfirmed!==true && r.amountManuallyConfirmed!==true?'<span class="status danger-badge">未確認金額</span>':'');
     let actions="";
-    if(canEdit) actions+=`<button class="link-btn" data-edit-record="${r.id}">編輯</button><button class="link-btn danger" data-delete-record="${r.id}">刪除</button>`;
+    if(canEdit && !r.installment?.everUsed) actions+=`<button class="link-btn" data-edit-record="${r.id}">編輯</button><button class="link-btn danger" data-delete-record="${r.id}">刪除</button>`;
     if(canEdit && !isManager() && evidenceUrl) actions+=`<button class="link-btn danger" data-detach-voucher="${escAttr(r.id)}">移除附件</button>`;
     if(isManager() && !r.estimated && !approved) actions+=`<button class="link-btn approve" data-approve-record="${r.id}">核對完成</button>`;
-    if(isManager() && approved) actions+=`<button class="link-btn unlock" data-unlock-record="${r.id}">解鎖</button>`;
+    if(!isInstallment(r) && isManager() && approved) actions+=`<button class="link-btn unlock" data-unlock-record="${r.id}">解鎖</button>`;
     const canPurgeVoucher=isManager()&&!r.voucherPurged&&!!(r.voucherPath||r.voucherStoragePath||githubPathFromUrl(evidenceUrl));
     return `<article class="record-card ${approved?'locked':''}"${canPurgeVoucher?' data-purgeable-voucher="true"':''}>
       <div><div class="title">${esc(r.purpose||"未填用途")}</div><small>${esc(c?.name||"未分類")}｜${esc(responsibleExpenseName(r))}</small></div>
@@ -455,6 +457,7 @@ function renderRecords(){
       <div>${statusBadge}${issues}</div>
       <div><small>核銷單據</small><div>${evidenceUrl?`<a class="text-link" target="_blank" rel="noopener" href="${escAttr(evidenceUrl)}">${esc(r.voucherFileName||"查看附件")}</a>`:"—"}</div></div>
       <div class="record-actions">${actions}</div>
+      ${isInstallment(r)?installmentUI.markup(r):""}
     </article>`;
   }).join("");
   document.querySelectorAll("[data-detach-voucher]").forEach(b=>b.onclick=()=>detachOwnVoucher(b.dataset.detachVoucher,b));
@@ -522,7 +525,7 @@ function openNewRecord(){
   if(!isPlanActive())return toast("此計畫已停用，無法新增使用紀錄");
   if(!state.categories.some(c=>c.active!==false))return toast("此計畫尚未建立可使用的經費項目");
   $("recordAmount").readOnly=false; $("recordAmount").style.backgroundColor=""; $("recordAmount").style.color=""; $("recordActualAdjustmentWrap").classList.add("hidden");
-  $("recordForm").reset(); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄";
+  $("recordForm").reset(); installmentUI.sync(null); $("recordId").value=""; $("recordDialogTitle").textContent="新增使用紀錄";
   renderRecordOwnerOptions(state.user.email.toLowerCase());
   if($("recordOwner"))$("recordOwner").disabled=false;
   $("recordChangeOwnerBtn")?.classList.add("hidden");
@@ -545,7 +548,7 @@ async function openEditRecord(id){
   if($("recordPurchaseOrderNo"))$("recordPurchaseOrderNo").value=r.purchaseOrderNo||"";
   if($("recordReimbursementNo"))$("recordReimbursementNo").value=r.reimbursementNo||"";
   $("recordArchived").checked=r.archived===true || !!(r.voucherUrl||r.folderUrl);
-  $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||"";
+  $("recordAmountConfirm").checked=r.amountConfirmed===true || r.amountManuallyConfirmed===true; $("recordNote").value=r.note||""; installmentUI.sync(r);
   if(r.voucherUrl||r.folderUrl){
     $("existingVoucherBox").classList.remove("hidden");
     $("existingVoucherBox").innerHTML=`目前附件：<a class="text-link" target="_blank" rel="noopener" href="${escAttr(r.voucherUrl||r.folderUrl)}">${esc(r.voucherFileName||"查看既有核銷單據")}</a><br><small>如重新選擇檔案，儲存後會以新附件取代。</small>`;
@@ -634,6 +637,7 @@ $("recordChangeOwnerBtn")?.addEventListener("click",changeExpenseOwner);
 async function saveRecord(e){
   e.preventDefault();
   const id=$("recordId").value, existing=id?state.records.find(x=>x.id===id):null;
+  if((isInstallment(existing)||$("recordInstallment")?.checked) && await installmentUI.save(existing))return;
   if(!id&&!isPlanActive())return toast("此計畫已停用，無法新增使用紀錄");
   if(existing&&isApproved(existing))return toast("此筆已核銷並鎖定，請先解鎖");
   if(existing&&!isManager()&&existing.ownerEmail!==state.user.email.toLowerCase())return toast("只能修改自己建立的使用紀錄");
@@ -767,6 +771,7 @@ async function detachOwnVoucher(id,button){
 }
 
 async function deleteRecord(id){
+  if(state.records.find(r=>r.id===id)?.installment?.everUsed)return toast("已有分次核銷歷程，請使用結案保留明細");
   const r=state.records.find(x=>x.id===id); if(!r)return;
   if(isApproved(r))return toast("此筆已核銷並鎖定，請先由管理員解鎖");
   if(!isManager()&&r.ownerEmail!==state.user.email.toLowerCase())return toast("只能刪除自己建立的使用紀錄");
@@ -812,12 +817,16 @@ function excelDateTime(v){
   }catch{return "";}
 }
 function recordStageText(r){
+  if(isInstallment(r))return r.installment.closed?"已核銷":"請購中";
   if(r.estimated===true)return r.estimateStage==="reimbursing"?"核銷中":r.estimateStage==="purchasing"?"請購中":"預估";
   if(isApproved(r))return "已核銷";
   return "待核對";
 }
 function amountByStage(rows,stage){
-  return rows.filter(r=>recordStageText(r)===stage||(stage==="預估"&&recordStageText(r)==="核銷中")).reduce((s,r)=>s+accountingAmount(r),0);
+  return rows.reduce((sum,r)=>{
+    if(isInstallment(r)){const b=installmentBuckets(r);return sum+(stage==="已核銷"?b.approved:stage==="待核對"?b.pending:stage==="請購中"?b.reserved:0);}
+    return sum+((recordStageText(r)===stage||(stage==="預估"&&recordStageText(r)==="核銷中"))?accountingAmount(r):0);
+  },0);
 }
 function budgetExcelStyleCell(cell,{fill,fontColor="FF243B53",bold=false,size=11,align="left",border=true}={}){
   cell.font={name:"Microsoft JhengHei",color:{argb:fontColor},bold,size};
@@ -1066,6 +1075,18 @@ async function downloadBudgetExcel(){
     });
     detail.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};
 
+    const installments=rows.filter(isInstallment);
+    if(installments.length){
+      const sheet=wb.addWorksheet("分次核銷明細");
+      sheet.addRow(["主紀錄ID","主項目","負責老師","原申請總額（參考勿加總）","目前占用（參考勿加總）","結案釋回（參考勿加總）","核銷日期","核銷項目","本次核銷金額（明細勿再扣預算）","核銷單號","單據","狀態"]);
+      for(const parent of installments){
+        const entries=installmentRows(parent);
+        for(const item of entries)sheet.addRow([parent.id,parent.purpose,responsibleExpenseName(parent),parent.amount,accountingAmount(parent),parent.installment.closed?parent.amount-parent.installment.total:0,item.date,item.purpose,item.amount,item.reimbursementNo,item.voucher.url,item.reviewed?"已核對":"待核對"]);
+        if(!entries.length)sheet.addRow([parent.id,parent.purpose,responsibleExpenseName(parent),parent.amount,accountingAmount(parent),parent.installment.closed?parent.amount:0,"","尚無核銷明細",0,"","",parent.installment.closed?"已結案":"進行中"]);
+      }
+      sheet.views=[{state:"frozen",ySplit:1}];sheet.columns.forEach((col,i)=>col.width=i===10?45:24);
+      sheet.getRow(1).eachCell(cell=>budgetExcelStyleCell(cell,{fill:"FF243B53",fontColor:"FFFFFFFF",bold:true}));
+    }
     const buffer=await wb.xlsx.writeBuffer();
     const safe=String(plan.name||"經費報表").replace(/[\\/:*?"<>|]/g,"_").slice(0,60);
     downloadBudgetBlob(new Blob([buffer],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),`${safe}_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -1231,3 +1252,5 @@ $('budgetHistoryBtn').onclick=async()=>{
   }catch(err){$('adjustmentBody').textContent='讀取失敗：'+err.message;}
 };
 
+
+const installmentUI=installInstallments({$,state,db,doc,collection,addDoc,runTransaction,serverTimestamp,isManager,toast,refreshOneExpense,uploadVoucherFile,selectedRecordOwner,esc,escAttr,money});
