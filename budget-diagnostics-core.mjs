@@ -1,6 +1,6 @@
 import {isBudgetManager,normalizeEmail} from './budget-permissions.mjs';
-export const DIAGNOSTICS_VERSION='20261121-1';
-export const EXPECTED_RELEASE={app:'permissions-20261120',upload:'0.7.0',notify:'1.2.0'};
+export const DIAGNOSTICS_VERSION='20261124-3';
+export const EXPECTED_RELEASE={app:'installments-20261124',upload:'0.7.0',notify:'1.2.0'};
 export function classifyFailure(input,stage='') {
   const text=String(input?.code||'')+' '+String(input?.message||input||'');
   let kind='unknown',code='unknown';
@@ -17,6 +17,12 @@ export function classifyFailure(input,stage='') {
 export function recordDiagnosis(r,email) {
   if(!r)return {kind:'missing',message:'找不到紀錄。請確認選取的紀錄仍存在。'};
   if(r.deleted===true)return {kind:'deleted',message:'紀錄在回收桶。請由管理員從回收桶還原。'};
+  if(r.installment?.enabled){
+    const s=r.installment;
+    if(s.closed)return {kind:'installment-closed',message:'分次核銷已結案，不能刪除、重開或再次釋回餘額。'};
+    if(s.everUsed||Object.keys(s.entries||{}).length)return {kind:'installment-used',message:'分次核銷已有歷程，不能取消模式或刪除主紀錄。請到「查看／登記明細」核對並結案；刪光明細也不解除模式鎖定。'};
+    return {kind:'installment-empty',message:'這是尚無核銷明細的分次主紀錄，可以刪除。新版刪除會先取消空白模式，再移到回收桶。舊版可自行：編輯 → 取消勾選分次核銷 → 儲存 → 刪除。若仍被拒絕，請下載摘要；改帳號角色不會修復程式或規則缺漏。'};
+  }
   if(r.reviewStatus==='approved'||r.reviewed===true||r.locked===true)return {kind:'locked',message:'紀錄已核對鎖定。請回使用紀錄按「解鎖」後再編輯。'};
   if(r.advanceAllocationId)return {kind:'linked',message:'已連結預支。金額請走追加或退款；解除分配請到預支／動支。本頁不更改紀錄。'};
   if(normalizeEmail(r.ownerEmail)!==normalizeEmail(email))return {kind:'other',message:'這筆不是目前帳號負責的紀錄；經費管理員仍可編輯，老師須用負責帳號操作。'};

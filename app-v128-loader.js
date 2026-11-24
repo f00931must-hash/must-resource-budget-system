@@ -73,6 +73,10 @@ function openNewRecord`);
   if(!confirm(\`確定將「\${r.purpose||"此筆"}」移到回收桶？\\n金額：\${money.format(r.amount||0)}\\n\\n10 天內可由管理員還原；附件不會因此刪除。\`))return;
   try{
     const actor=state.user.email.toLowerCase();
+    if(r.installment?.enabled){
+      const {prepareInstallmentRecycle}=await import(new URL("./budget-installment-recycle.mjs?v=20261124-1",location.href).href);
+      await prepareInstallmentRecycle({db,ref:doc(db,"expenseRecords",id),runTransaction,serverTimestamp,email:actor,manager:isManager()});
+    }
     await updateDoc(doc(db,"expenseRecords",id),{deleted:true,deletedAt:serverTimestamp(),deletedBy:actor,updatedAt:serverTimestamp(),updatedBy:actor});
     if(isManager()) await addDoc(collection(db,"auditLogs"),{type:"recycle-bin",targetId:id,planId:state.activePlanId,action:"soft-delete-record",actorEmail:actor,createdAt:serverTimestamp()}).catch(err=>console.error("回收桶操作紀錄寫入失敗",err));
     await loadPlanData(); renderAll(); toast("使用紀錄已移到回收桶，10 天內可由管理員還原");
