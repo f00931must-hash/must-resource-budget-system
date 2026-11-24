@@ -24,6 +24,7 @@ SUITE=[
  ('python','tests/refund-receipt-20261119.py'),
  ('python','tests/split-refund-receipt-20261119.py'),
  ('python','tests/split-payout-initialization-20261120.py'),
+ ('node','tests/installments-emulator.cjs'),
  ('node','tests/diagnostics-account-emulator.cjs'),
  ('node','tests/expense-form-emulator-20261120.cjs'),
  ('node','tests/refund-button-emulator-20261119.cjs'),

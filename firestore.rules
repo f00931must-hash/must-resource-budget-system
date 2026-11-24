@@ -761,9 +761,64 @@ service cloud.firestore {
         ));
     }
     // Exactly one route is evaluated. Unrelated operations cannot spend this request's rules budget.
+    function installmentInitial(d) {
+      let s=d.installment;
+      return !linked(d) && d.amount is int && d.amount>0 && d.estimated==true
+        && s.keys().hasOnly(['enabled','everUsed','closed','total','reviewedTotal','entries','mutationKey'])
+        && s.enabled==true && s.everUsed==false && s.closed==false
+        && s.total==0 && s.reviewedTotal==0 && s.entries=={} && s.mutationKey=='';
+    }
+    function installmentEntry(e) {
+      return e is map && e.keys().hasOnly(['date','purpose','amount','reimbursementNo','voucher','confirmed','reviewed'])
+        && e.date is string && e.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        && e.purpose is string && e.purpose.size()>0 && e.purpose.size()<=300
+        && e.amount is int && e.amount>0 && e.reimbursementNo is string && e.reimbursementNo.size()<=100
+        && e.confirmed==true && e.reviewed is bool
+        && e.voucher is map && e.voucher.keys().hasOnly(['url','name','path','type','size'])
+        && e.voucher.url is string && e.voucher.url.matches('https://.*')
+        && e.voucher.name is string && e.voucher.path is string && e.voucher.type is string
+        && e.voucher.size is number && e.voucher.size>=0 && e.voucher.size<=20*1024*1024;
+    }
+    function installmentMutation(a,b) {
+      let key=b.mutationKey;
+      let old=a.entries.get(key,{});
+      let next=b.entries.get(key,{});
+      let removed=next=={};
+      let added=old=={};
+      return key is string && key.size()>0 && key.size()<=100
+        && b.entries.diff(a.entries).affectedKeys().hasOnly([key])
+        && b.entries.diff(a.entries).affectedKeys().size()==1
+        && (!removed || (!added && old.reviewed==false))
+        && (removed || installmentEntry(next))
+        && (added ? next.reviewed==false :
+          ((old.reviewed==false && (removed || next.reviewed==false))
+           || (manager() && !removed && next.diff(old).affectedKeys().hasOnly(['reviewed']))))
+        && b.total==a.total-old.get('amount',0)+next.get('amount',0)
+        && b.reviewedTotal==a.reviewedTotal-(old.get('reviewed',false)?old.amount:0)+(next.get('reviewed',false)?next.amount:0)
+        && b.everUsed==true && b.enabled==true && b.closed==false;
+    }
+    function installmentUpdate() {
+      let a=resource.data.installment;
+      let b=request.resource.data.installment;
+      return enabledUser() && (manager() || resource.data.ownerEmail==email())
+        && !linked(resource.data) && resource.data.get('deleted',false)==false && !recordLocked()
+        && a.enabled==true && a.closed==false
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['installment','purpose','note','purchaseOrderNo','updatedAt','updatedBy'])
+        && b.keys().hasOnly(['enabled','everUsed','closed','total','reviewedTotal','entries','mutationKey'])
+        && b.entries is map && b.entries.size()<=150
+        && b.total is int && b.total>=0 && b.total<=resource.data.amount
+        && b.reviewedTotal is int && b.reviewedTotal>=0 && b.reviewedTotal<=b.total
+        && ((a.entries==b.entries && a.total==b.total && a.reviewedTotal==b.reviewedTotal && a.everUsed==b.everUsed
+          && ((b.enabled==a.enabled && b.closed==a.closed)
+            || (a.everUsed==false && b.enabled==false && b.closed==false)
+            || (manager() && b.enabled==true && b.closed==true && b.total==b.reviewedTotal)))
+          || installmentMutation(a,b));
+    }
+
     function expenseUpdate(recordId) {
       let k = changed();
-      return k.hasAny(['advanceAllocationId']) ?
+      return resource.data.get('installment',{}).get('enabled',false) || k.hasAny(['installment']) ? installmentUpdate()
+        : k.hasAny(['advanceAllocationId']) ?
           (linked(request.resource.data) ? linkExistingEstimate(recordId) : expenseUnlink())
         : k.hasAny(['advanceTopUpTotal']) ? expenseTopUp(recordId)
         : k.hasAny(['accountingOwnerEmail','accountingOwnerName','ownerEmail']) ?
@@ -788,6 +843,7 @@ service cloud.firestore {
     match /expenseRecords/{recordId} {
       allow read: if enabledUser();
       allow create: if enabledUser()
+        && (!request.resource.data.keys().hasAny(['installment']) || installmentInitial(request.resource.data))
         && !request.resource.data.keys().hasAny(['accountingVoucherAmount','advanceTopUpTotal','accountingOwnerEmail','accountingOwnerName'])
         && request.resource.data.get('reviewStatus', 'pending') != 'approved'
         && request.resource.data.get('reviewed', false) != true
@@ -807,7 +863,7 @@ service cloud.firestore {
           )
         );
       allow update: if enabledUser() && stamped() && expenseUpdate(recordId);
-      allow delete: if enabledUser() && !linked(resource.data) && (
+      allow delete: if enabledUser() && !resource.data.get('installment',{}).get('everUsed',false) && !resource.data.get('installment',{}).get('closed',false) && !linked(resource.data) && (
         manager()
         || (
           resource.data.ownerEmail == email()

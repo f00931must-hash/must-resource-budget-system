@@ -105,7 +105,7 @@ async function loadCandidates(editAllocation=null){
   const all=rSnap.docs.map(d=>({id:d.id,...d.data()}));
   availableRecords=all.filter(r=>
     (!ownOnly||r.ownerEmail===currentEmail) && r.deleted!==true &&
-    r.estimated===true &&
+    r.estimated===true && r.installment?.enabled!==true &&
     !approved(r) &&
     batchCategoryIds(batch).includes(String(r.categoryId||"")) &&
     r.semester===batch.semester &&
@@ -191,7 +191,7 @@ async function saveLink(e){
       const latest=await tx.get(doc(db,"expenseRecords",r.id)),bs=await tx.get(doc(db,"advanceBatches",bid));
       if(!latest.exists()||!bs.exists()||bs.data().deleted===true)throw Error("資料已變更，請重試");
       const fresh=latest.data();
-      if(fresh.advanceAllocationId||fresh.deleted===true||fresh.estimated!==true||approved(fresh)||Number(fresh.amount)!==num(r.amount))throw Error("預估已變更或已分配，請重新選取");
+      if(fresh.installment?.enabled||fresh.advanceAllocationId||fresh.deleted===true||fresh.estimated!==true||approved(fresh)||Number(fresh.amount)!==num(r.amount))throw Error("預估已變更或已分配，請重新選取");
       if(fresh.ownerEmail!==r.ownerEmail||fresh.categoryId!==r.categoryId||fresh.planId!==p||fresh.semester!==b.semester)throw Error("預估內容已變更，請重試");
       if(ownOnly&&(fresh.ownerEmail!==email||bs.data().handlerEmail!==email))throw Error("只能分配自己的紀錄");
       phase="同步寫入分配與使用紀錄";

@@ -2,7 +2,7 @@
 // Safe wrapper around the current stable app-v128-loader.
 // Adds an optional estimateStage field while preserving estimated=true compatibility.
 
-const BASE_LOADER = "./app-v128-loader.js?v=permissions-20261120";
+const BASE_LOADER = "./app-v128-loader.js?v=installments-20261124";
 
 async function loadStageAwareBudgetApp(){
   const res = await fetch(BASE_LOADER,{cache:"no-store"});
