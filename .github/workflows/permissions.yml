@@ -24,7 +24,7 @@ jobs:
       - name: Install diagnostic DOM test dependency (development only)
         run: npm install --prefix .emulator --no-save jsdom@26
       - name: Diagnostic account safety, privacy and UI
-        run: node --test tests/permission-diagnostics.test.mjs tests/permission-diagnostics-ui.test.mjs
+        run: node --test tests/advance-net-totals.test.mjs tests/permission-diagnostics.test.mjs tests/permission-diagnostics-ui.test.mjs
       - name: Role, upload authorization and loader contracts
         run: node --test tests/budget-role-policy.test.mjs tests/budget-upload-policy.test.mjs tests/budget-notify-policy.test.mjs tests/budget-loader.test.mjs
       - name: Frontend undefined-name check
