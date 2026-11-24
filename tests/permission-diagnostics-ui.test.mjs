@@ -43,3 +43,13 @@ test('record cards get one manager-only diagnostic button without automatic reco
   p.$('recordList').querySelector('[data-pd-record]').onclick();await new Promise(resolve=>setTimeout(resolve,0));assert.deepEqual(p.reads.map(r=>r.collection),['users','expenseRecords']);assert.equal(p.writes.length,0);
  }finally{p.dom.window.close()}
 });
+test('staged cards without edit/unlock buttons still expose actionable diagnosis',async()=>{
+ const p=await page();try{
+  p.profiles.set('staged-empty',{ownerEmail:'manager@example.test',installment:{enabled:true,everUsed:false,entries:{}}});
+  p.$('recordList').innerHTML='<article class="record-card"><div><button data-installment="staged-empty">明細</button></div></article>';
+  await new Promise(resolve=>setTimeout(resolve,10));
+  const button=p.$('recordList').querySelector('[data-pd-record]');assert.ok(button);button.click();
+  await new Promise(resolve=>setTimeout(resolve,10));
+  assert.match(p.$('pdRecordResult').textContent,/取消勾選/);assert.equal(p.writes.length,0);
+ }finally{p.dom.window.close();}
+});

@@ -43,3 +43,10 @@ test('downloaded summaries are bounded and exclude messages, accounts, file path
  const report=diagnosticReport({checks:[{service:'upload',status:'ok',version:'0.7.0',email:teacher,token:'SECRET'}],events:Array.from({length:30},()=>({...entry,at:1,message:raw,token:'SECRET',phase:raw}))});
  assert.equal(report.events.length,20);const json=JSON.stringify(report);for(const secret of [teacher,'6010','private.pdf','SECRET','uploads/'])assert.ok(!json.includes(secret));assert.equal(report.events[0].phase,'未提供階段');
 });
+
+test('installment diagnosis gives an actionable empty-case cleanup and preserves history restrictions',()=>{
+ assert.equal(recordDiagnosis({installment:{enabled:true,everUsed:false,entries:{}}},'manager@example.test').kind,'installment-empty');
+ assert.match(recordDiagnosis({installment:{enabled:true,everUsed:false,entries:{}}},'manager@example.test').message,/取消勾選/);
+ assert.equal(recordDiagnosis({installment:{enabled:true,everUsed:true,entries:{}}},'manager@example.test').kind,'installment-used');
+ assert.equal(recordDiagnosis({installment:{enabled:true,closed:true}},'manager@example.test').kind,'installment-closed');
+});

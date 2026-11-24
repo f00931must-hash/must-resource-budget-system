@@ -35,4 +35,15 @@ actor=manager;data={...data,installment:mutateInstallment(data,'close','',null,t
 await assert.rejects(put({...data,installment:{...data.installment,closed:false}}));await assert.rejects(put({...data,amount:0}));console.log('closed case cannot reopen or release again PASS');
 const disabled={...original,installment:{...emptyInstallment(),enabled:false}};await commit([write('expenseRecords/empty',original)],'owner');
 await commit([write('expenseRecords/empty',{...disabled,updatedBy:manager,updatedAt:{__serverTime:true}})],jwt());console.log('empty mode can be disabled PASS');
+const {prepareInstallmentRecycle}=await import('../budget-installment-recycle.mjs');
+async function prepare(id){return prepareInstallmentRecycle({db:{},ref:'expenseRecords/'+id,email:actor,manager:actor===manager,serverTimestamp:()=>({__serverTime:true}),runTransaction:async(_,fn)=>{const writes=[];const result=await fn({get:read,update:(ref,d)=>writes.push(write(ref,d,true))});if(writes.length)await commit(writes,jwt());return result;}});}
+for(const who of [teacher,manager]){
+ actor=who;const id='recycle-'+who.split('@')[0];await commit([write('expenseRecords/'+id,original)],'owner');
+ await prepare(id);assert.equal((await read('expenseRecords/'+id)).data().amount,140000);
+ await commit([write('expenseRecords/'+id,{deleted:true,deletedAt:{__serverTime:true},deletedBy:actor,updatedAt:{__serverTime:true},updatedBy:actor},true)],jwt());
+ assert.equal((await read('expenseRecords/'+id)).data().deleted,true);console.log('actual empty staged recycle '+who+' PASS');
+}
+actor=other;await commit([write('expenseRecords/forbidden-empty',original)],'owner');await assert.rejects(prepare('forbidden-empty'));console.log('unrelated teacher cannot prepare deletion PASS');
+actor=manager;await assert.rejects(prepare('parent'));console.log('cannot prepare used or closed parent deletion PASS');
+
 })().catch(error=>{console.error(error);process.exitCode=1});
