@@ -1,3 +1,4 @@
+import {grossAdvance,netAdvance} from "./budget-advance-totals.mjs?v=20261124-net";
 import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 import {loadSplitPayouts,splitPending,splitMarkup,splitAction} from "./budget-split-payout.js?v=permissions-20261120";
 import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=permissions-20261120";
@@ -377,7 +378,7 @@ async function saveAllocation(e){
   if(!owner||owner.enabled!==true)return alert("請選擇有效的負責老師。");
   if(estimatedAmount<=0)return alert("預估分配金額必須大於 0。");
   const same=allocations.filter(a=>a.batchId===batchItem.id&&a.deleted!==true&&a.id!==editId);
-  const afterTotal=same.reduce((s,a)=>s+num(a.estimatedAmount)-confirmedRefund(a,recordForAllocation(a)),0)+estimatedAmount;
+  const afterTotal=same.reduce((s,a)=>s+netAdvance(a,confirmedRefund(a,recordForAllocation(a))),0)+estimatedAmount;
   if(afterTotal>num(batchItem.totalAmount))return alert(`分配後會超過本批次總額 ${money.format(batchItem.totalAmount)}。`);
 
   try{
@@ -466,10 +467,10 @@ function render(){
   const aa=allocations.filter(a=>a.batchId===b.id&&a.deleted!==true);
   let estimateTotal=0,actualTotal=0,projectedTotal=0,actualCount=0;
   for(const a of aa){
-    estimateTotal+=num(a.estimatedAmount);
+    estimateTotal+=grossAdvance(a);
     const r=recordForAllocation(a);
     if(r&&isActual(r)){actualTotal+=num(r.amount)+num(r.advanceTopUpTotal);projectedTotal+=num(r.amount)+num(r.advanceTopUpTotal);actualCount++;}
-    else projectedTotal+=num(a.estimatedAmount)+num(a.advanceTopUpTotal);
+    else projectedTotal+=netAdvance(a,confirmedRefund(a,r));
   }
   const total=num(b.totalAmount);
   const unallocated=total-estimateTotal+aa.reduce((sum,a)=>sum+confirmedRefund(a,recordForAllocation(a)),0);
@@ -481,7 +482,7 @@ function render(){
     ["預支／動支總額",money.format(total)],
     ["累計已領",money.format(receivedSum)],
     ["尚未領得",money.format(total-receivedSum)],
-    ["已分配預估",money.format(estimateTotal)],
+    ["已分配（含追加）",money.format(estimateTotal)],
     ["已實際支用",money.format(actualTotal)],
     ["待重新分配",money.format(realloc)],
     ["實際剩餘金額",money.format(receivedSum-estimateTotal+returnedTotal)]
@@ -526,7 +527,9 @@ function render(){
   $("advanceAllocationList").innerHTML=aa.map(a=>{
     const r=recordForAllocation(a);
     const actual=r&&isActual(r)?num(r.amount)+num(r.advanceTopUpTotal):null;
-    const variance=actual===null?null:num(a.estimatedAmount)+num(a.advanceTopUpTotal)-actual;
+    const returned=confirmedRefund(a,r);
+    const net=netAdvance(a,returned);
+    const variance=actual===null?null:net-actual;
     const status=!r?'找不到使用紀錄':r.estimated===true?'預估中':isApproved(r)?'已核銷・已鎖定':'已轉實際・待核對';
     const varianceHtml=variance===null?'—':variance===0?'<span class="variance-zero">剛好</span>':variance>0?`<span class="variance-positive">多估 ${money.format(variance)}</span>`:`<span class="variance-negative">少估 ${money.format(Math.abs(variance))}</span>`;
     const canEdit=false;
@@ -541,7 +544,7 @@ function render(){
       <div><small>實際核銷</small><strong>${actual===null?'尚未':money.format(actual)}</strong></div>
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small>${settlementMarkup(a,r,true)}</div>
       <div>${!a.payoutSplit&&!receiptConfirmed&&(!ownOnly||String(a.ownerEmail||"").toLowerCase()===currentEmail)?`<button class="primary-btn" data-manager-own-receipt="${a.id}">${String(a.ownerEmail||"").toLowerCase()===currentEmail?"確認收到分配金額":"代登已領款"}</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
-      <div><small>追加預支</small> <strong>${money.format(a.advanceTopUpTotal||0)}</strong> ・ 含追加合計 ${money.format(num(a.estimatedAmount)+num(a.advanceTopUpTotal))}
+      <div><small>追加預支</small> <strong>${money.format(a.advanceTopUpTotal||0)}</strong> ・ 已確認退款 ${money.format(returned)} ・ 淨預支合計 ${money.format(net)}
       ${!ownOnly&&r?'<button type="button" class="link-btn" data-advance-topup="'+escAttr(a.id)+'">登記追加預支</button>':""}</div>
       ${splitMarkup(a,splitPayouts)}
     </div>`;
