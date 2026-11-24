@@ -44,3 +44,24 @@ test('teacher has no review or close controls and upload-less save fails visibly
  p.$('instPurpose').value='耗材';p.$('instAmount').value='8000';p.$('instConfirmed').checked=true;await p.$('installmentEntryForm').onsubmit({preventDefault(){}});assert.equal(p.writes.length,1);assert.match(p.errors.at(-1),/單據/);
  }finally{p.dom.window.close();}
 });
+
+test('real capture-phase submit guard does not make installment saving silently skip',async()=>{
+ const p=await page();try{
+  vm.runInContext(fs.readFileSync('budget-submit-guard-v169.js','utf8'),p.dom.getInternalVMContext());
+  let pending,calls=0;p.$('recordForm').addEventListener('submit',event=>{event.preventDefault();calls++;pending=p.api.save(null);});
+  const event=()=>new p.w.Event('submit',{bubbles:true,cancelable:true});
+  p.$('recordForm').dispatchEvent(event());p.$('recordForm').dispatchEvent(event());
+  await pending;await tick();
+  assert.equal(calls,1);assert.equal(p.writes.length,1);assert.equal(p.$('recordSaveBtn').disabled,false);
+  assert.equal(p.$('recordSavingOverlay').classList.contains('hidden'),true);
+ }finally{p.dom.window.close();}
+});
+test('validation errors release the actual saving overlay without creating a record',async()=>{
+ const p=await page();try{
+  vm.runInContext(fs.readFileSync('budget-submit-guard-v169.js','utf8'),p.dom.getInternalVMContext());
+  p.$('recordPurpose').value='';let pending;
+  p.$('recordForm').addEventListener('submit',event=>{event.preventDefault();pending=p.api.save(null);});
+  p.$('recordForm').dispatchEvent(new p.w.Event('submit',{bubbles:true,cancelable:true}));await pending;await tick();
+  assert.equal(p.writes.length,0);assert.equal(p.$('recordSavingOverlay').classList.contains('hidden'),true);assert.equal(p.$('recordSaveBtn').disabled,false);
+ }finally{p.dom.window.close();}
+});

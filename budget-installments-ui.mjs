@@ -16,9 +16,10 @@ export function installInstallments(c){
   if(active&&$('recordNoVoucherRequest'))$('recordNoVoucherRequest').checked=false;
  }
  $('recordInstallment').onchange=toggle;
+ let parentSaving=false;
  async function save(existing){
   if(!$('recordInstallment').checked&&!isInstallment(existing))return false;
-  const btn=$('recordSaveBtn');if(btn.disabled)return true;btn.disabled=true;
+  const btn=$('recordSaveBtn');if(parentSaving)return true;parentSaving=true;btn.disabled=true;
   const planId=state.activePlanId,email=state.user.email.toLowerCase();
   try{
    const categoryId=$('recordCategory').value,semester=$('recordSemester').value.trim(),amount=Number($('recordAmount').value),purpose=$('recordPurpose').value.trim();
@@ -41,7 +42,7 @@ export function installInstallments(c){
    }
    $('recordDialog').close();await refreshOneExpense(id,planId);toast('分次核銷主紀錄已儲存');
   }catch(e){toast('分次核銷儲存失敗：'+e.message,8000);}
-  finally{btn.disabled=false;}return true;
+  finally{parentSaving=false;btn.disabled=false;}return true;
  }
  const dialog=document.createElement('dialog');dialog.id='installmentDialog';dialog.style.cssText='width:min(960px,95vw);max-height:90vh;overflow:auto;border:0;border-radius:16px;padding:24px';document.body.append(dialog);
  let currentId='',editId='',busy=false;
