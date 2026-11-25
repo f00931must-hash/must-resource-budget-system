@@ -465,9 +465,8 @@ function render(){
   }
 
   const aa=allocations.filter(a=>a.batchId===b.id&&a.deleted!==true);
-  let originalAssignedTotal=0,estimateTotal=0,actualTotal=0,projectedTotal=0,actualCount=0;
+  let estimateTotal=0,actualTotal=0,projectedTotal=0,actualCount=0;
   for(const a of aa){
-    originalAssignedTotal+=num(a.estimatedAmount);
     estimateTotal+=grossAdvance(a);
     const r=recordForAllocation(a);
     if(r&&isActual(r)){actualTotal+=num(r.amount)+num(r.advanceTopUpTotal);projectedTotal+=num(r.amount)+num(r.advanceTopUpTotal);actualCount++;}
@@ -483,7 +482,7 @@ function render(){
     ["預支／動支總額",money.format(total)],
     ["累計已領",money.format(receivedSum)],
     ["尚未領得",money.format(total-receivedSum)],
-    ["已分配（不含追加）",money.format(originalAssignedTotal)],
+    ["已分配（淨額）",money.format(estimateTotal-returnedTotal),"原分配＋實際補款－已確認退款；退款回收後再分配不重複累計。"],
     ["已實際支用",money.format(actualTotal),"已轉實際的連結紀錄合計（含待核對、已核銷及追加）；不含仍為預估的紀錄。"],
     ["待重新分配",money.format(realloc)],
     ["實際剩餘金額",money.format(receivedSum-estimateTotal+returnedTotal)]

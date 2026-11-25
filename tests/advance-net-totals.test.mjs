@@ -37,7 +37,7 @@ test('multiple allocations conserve cash including repeated top-ups and refunds'
  const total=entries.reduce((s,a)=>s+netAdvance(a,confirmedRefund(a,{amount:a.estimatedAmount-a.refundConfirmedTotal})),0);
  assert.equal(total,6188);assert.equal(10000-total,3812);
 });
-test('cash summary and allocation limit retain top-ups while original allocation display excludes them',()=>{
+test('cash summary and allocation limit consistently retain top-ups and verified refunds',()=>{
  const src=readFileSync(new URL('../budget-advance-v150.js',import.meta.url),'utf8');
  assert.match(src,/estimateTotal\+=grossAdvance\(a\)/);
  assert.match(src,/const afterTotal=same.reduce\(\(s,a\)=>s\+netAdvance\(a,confirmedRefund\(a,recordForAllocation\(a\)\)\)/);
@@ -56,7 +56,7 @@ function card(html,label){return html.split('<span>'+label+'</span>')[1]?.split(
 test('actual summary shows original allocation and preserves refund/top-up cash neutrality',()=>{
  const a={id:'a',batchId:'batch',expenseRecordId:'r',estimatedAmount:5088,advanceTopUpTotal:82,refundConfirmedTotal:82};
  const html=renderedSummary([a],[{id:'r',amount:5006,advanceTopUpTotal:82,estimated:true}]);
- assert.match(card(html,'已分配（不含追加）'),/<strong>5088<\/strong>/);
+ assert.match(card(html,'已分配（淨額）'),/<strong>5088<\/strong>/);
  assert.match(card(html,'實際剩餘金額'),/<strong>0<\/strong>/);
  assert.match(card(html,'待重新分配'),/<strong>0<\/strong>/);
  assert.match(card(html,'已實際支用'),/<strong>0<\/strong>/);
@@ -65,8 +65,20 @@ test('actual-use calculation includes pending-review and approved records, exclu
  const allocations=[{id:'a',batchId:'batch',expenseRecordId:'estimate',estimatedAmount:1000},{id:'b',batchId:'batch',expenseRecordId:'pending',estimatedAmount:2000,advanceTopUpTotal:82},{id:'c',batchId:'batch',expenseRecordId:'approved',estimatedAmount:3000},{id:'deleted',batchId:'batch',expenseRecordId:'gone',estimatedAmount:9000,deleted:true}];
  const records=[{id:'estimate',amount:1000,estimated:true},{id:'pending',amount:2000,advanceTopUpTotal:82,estimated:false,reviewStatus:'pending'},{id:'approved',amount:3000,estimated:false,reviewStatus:'approved'},{id:'gone',amount:9000,estimated:false}];
  const html=renderedSummary(allocations,records,10000);
- assert.match(card(html,'已分配（不含追加）'),/<strong>6000<\/strong>/);
+ assert.match(card(html,'已分配（淨額）'),/<strong>6082<\/strong>/);
  assert.match(card(html,'已實際支用'),/<strong>5082<\/strong>/);
  assert.match(card(html,'已實際支用'),/含待核對、已核銷及追加/);
  assert.match(card(html,'實際剩餘金額'),/<strong>3918<\/strong>/);
+});
+
+test('reusing returned cash does not inflate the current assigned balance',()=>{
+ const a={id:'a',batchId:'batch',expenseRecordId:'r',estimatedAmount:379095,advanceTopUpTotal:82,refundConfirmedTotal:18319};
+ const html=renderedSummary([a],[{id:'r',amount:360776,advanceTopUpTotal:82,estimated:true}],360858);
+ assert.match(card(html,'已分配（淨額）'),/<strong>360858<\/strong>/);
+ assert.match(card(html,'實際剩餘金額'),/<strong>0<\/strong>/);
+});
+test('net assignments are not artificially capped at received cash',()=>{
+ const html=renderedSummary([{batchId:'batch',estimatedAmount:200}],[],100);
+ assert.match(card(html,'已分配（淨額）'),/<strong>200<\/strong>/);
+ assert.match(card(html,'實際剩餘金額'),/<strong>-100<\/strong>/);
 });
