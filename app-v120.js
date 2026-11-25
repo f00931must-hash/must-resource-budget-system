@@ -1,5 +1,5 @@
-const {isInstallment,occupiedAmount,reconciliationParts,installmentRows,installmentBuckets}=await import(new URL('./budget-installments-core.mjs?v=20261124-1',location.href).href);
-const {installInstallments}=await import(new URL('./budget-installments-ui.mjs?v=20261124-2',location.href).href);
+const {isInstallment,occupiedAmount,reconciliationParts,installmentRows,installmentBuckets}=await import(new URL('./budget-installments-core.mjs?v=20261125-1',location.href).href);
+const {installInstallments}=await import(new URL('./budget-installments-ui.mjs?v=20261125-1',location.href).href);
 const {isBudgetManager} = await import(new URL("./budget-permissions.mjs", location.href).href);
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
@@ -1081,7 +1081,7 @@ async function downloadBudgetExcel(){
       sheet.addRow(["主紀錄ID","主項目","負責老師","原申請總額（參考勿加總）","目前占用（參考勿加總）","結案釋回（參考勿加總）","核銷日期","核銷項目","本次核銷金額（明細勿再扣預算）","核銷單號","單據","狀態"]);
       for(const parent of installments){
         const entries=installmentRows(parent);
-        for(const item of entries)sheet.addRow([parent.id,parent.purpose,responsibleExpenseName(parent),parent.amount,accountingAmount(parent),parent.installment.closed?parent.amount-parent.installment.total:0,item.date,item.purpose,item.amount,item.reimbursementNo,item.voucher.url,item.reviewed?"已核對":"待核對"]);
+        for(const item of entries)sheet.addRow([parent.id,parent.purpose,responsibleExpenseName(parent),parent.amount,accountingAmount(parent),parent.installment.closed?parent.amount-parent.installment.total:0,item.date,item.purpose,item.amount,item.reimbursementNo,item.voucher?.url||"待補單據",item.reviewed?"已核對":"待核對"]);
         if(!entries.length)sheet.addRow([parent.id,parent.purpose,responsibleExpenseName(parent),parent.amount,accountingAmount(parent),parent.installment.closed?parent.amount:0,"","尚無核銷明細",0,"","",parent.installment.closed?"已結案":"進行中"]);
       }
       sheet.views=[{state:"frozen",ySplit:1}];sheet.columns.forEach((col,i)=>col.width=i===10?45:24);

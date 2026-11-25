@@ -18,6 +18,7 @@ export function mutateInstallment(record,action,id,item,manager=false){
  const old=s.entries[id];
  if(action==='review'||action==='unlock'){
   if(!manager||!old)throw Error('只有經費管理員可以核對明細');
+  if(action==='review'&&!old.voucher?.url)throw Error('請先補上單據再核對完成');
   next.entries[id]={...old,reviewed:action==='review'};
  }else if(action==='delete'){
   if(!old||old.reviewed)throw Error('已核對明細須由管理員先解鎖');
@@ -25,7 +26,7 @@ export function mutateInstallment(record,action,id,item,manager=false){
  }else{
   if(old?.reviewed)throw Error('已核對明細須先解鎖');
   if(!Number.isSafeInteger(item.amount)||item.amount<=0||!item.purpose?.trim()||!/^\d{4}-\d{2}-\d{2}$/.test(item.date))throw Error('請填日期、用途與正整數金額');
-  if(!item.voucher?.url?.startsWith('https://')||item.confirmed!==true)throw Error('請上傳單據並確認單據金額');
+  if(item.voucher && !item.voucher.url?.startsWith('https://'))throw Error('單據連結格式不正確');
   next.entries[id]={...item,reviewed:false};
  }
  const updated=next.entries[id];
@@ -38,7 +39,7 @@ export function mutateInstallment(record,action,id,item,manager=false){
 }
 export function reconciliationParts(r){
  if(!isInstallment(r))return [r];
- const items=installmentRows(r).map(e=>({...r,purpose:r.purpose+'｜'+e.purpose,amount:e.amount,estimated:!e.reviewed,estimateStage:e.reviewed?'':'reimbursing',reviewStatus:e.reviewed?'approved':'estimated',reviewed:e.reviewed,installment:undefined,accountingId:e.reimbursementNo||'',reimbursementNo:e.reimbursementNo||'',voucherUrl:e.voucher.url}));
+ const items=installmentRows(r).map(e=>({...r,purpose:r.purpose+'｜'+e.purpose,amount:e.amount,estimated:!e.reviewed,estimateStage:e.reviewed?'':'reimbursing',reviewStatus:e.reviewed?'approved':'estimated',reviewed:e.reviewed,installment:undefined,accountingId:e.reimbursementNo||'',reimbursementNo:e.reimbursementNo||'',voucherUrl:e.voucher?.url||''}));
  const left=Number(r.amount)-r.installment.total;
  if(!r.installment.closed&&left>0)items.push({...r,purpose:r.purpose+'｜尚未核銷餘額',amount:left,estimated:true,estimateStage:'purchasing',installment:undefined,accountingId:r.purchaseOrderNo||''});
  return items;

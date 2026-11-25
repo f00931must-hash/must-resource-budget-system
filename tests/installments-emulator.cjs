@@ -19,6 +19,17 @@ await put(data);console.log('teacher creates staged parent PASS');
 const forged={...data,installment:{...data.installment,total:8000}};
 await assert.rejects(commit([write('expenseRecords/forged',forged)],jwt()));console.log('cannot create prefilled aggregate PASS');
 const entry={purpose:'supplies',date:'2026-11-24',amount:8000,reimbursementNo:'G123456789',voucher:{url:'https://example.test/private-test',name:'fake.pdf',path:'fake',type:'application/pdf',size:10},confirmed:true,reviewed:false};
+
+const draft={purpose:'draft without file',date:'2026-11-25',amount:8000,reimbursementNo:'',voucher:null};
+let optional={...original};optional.installment=mutateInstallment(optional,'save','draft',draft);
+await commit([write('expenseRecords/optional',original)],'owner');
+const putOptional=async r=>commit([write('expenseRecords/optional',{...r,updatedBy:actor,updatedAt:{__serverTime:true}})],jwt());
+await putOptional(optional);assert.equal(optional.installment.total,8000);console.log('teacher saves draft without attachment or checkbox PASS');
+actor=manager;
+await assert.rejects(putOptional({...optional,installment:{...optional.installment,entries:{draft:{...draft,reviewed:true}},reviewedTotal:8000}}));console.log('server rejects reviewing draft until evidence exists PASS');
+actor=teacher;optional.installment=mutateInstallment(optional,'save','draft',{...draft,voucher:entry.voucher});await putOptional(optional);assert.equal(optional.installment.total,8000);console.log('supplement existing draft evidence without duplicate amount PASS');
+actor=manager;optional.installment=mutateInstallment(optional,'review','draft',null,true);await putOptional(optional);console.log('manager reviews supplemented draft without checkbox PASS');
+actor=teacher;
 data={...data,installment:mutateInstallment(data,'save','item1',entry)};await put(data);assert.equal(occupiedAmount(data),140000);console.log('append single child does not double-count PASS');
 actor=other;await assert.rejects(put({...data,note:'other'}));actor=teacher;console.log('unrelated teacher denied PASS');
 await assert.rejects(put({...data,installment:{...data.installment,everUsed:false,enabled:false}}));console.log('mode lock cannot be reset PASS');

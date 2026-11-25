@@ -768,16 +768,21 @@ service cloud.firestore {
         && s.enabled==true && s.everUsed==false && s.closed==false
         && s.total==0 && s.reviewedTotal==0 && s.entries=={} && s.mutationKey=='';
     }
+    function installmentVoucher(v) {
+      return v is map && v.keys().hasOnly(['url','name','path','type','size'])
+        && v.url is string && v.url.matches('https://.*')
+        && v.name is string && v.path is string && v.type is string
+        && v.size is number && v.size>=0 && v.size<=20*1024*1024;
+    }
     function installmentEntry(e) {
+      let v=e.get('voucher',null);
       return e is map && e.keys().hasOnly(['date','purpose','amount','reimbursementNo','voucher','confirmed','reviewed'])
         && e.date is string && e.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
         && e.purpose is string && e.purpose.size()>0 && e.purpose.size()<=300
         && e.amount is int && e.amount>0 && e.reimbursementNo is string && e.reimbursementNo.size()<=100
-        && e.confirmed==true && e.reviewed is bool
-        && e.voucher is map && e.voucher.keys().hasOnly(['url','name','path','type','size'])
-        && e.voucher.url is string && e.voucher.url.matches('https://.*')
-        && e.voucher.name is string && e.voucher.path is string && e.voucher.type is string
-        && e.voucher.size is number && e.voucher.size>=0 && e.voucher.size<=20*1024*1024;
+        && e.reviewed is bool
+        && (v==null || installmentVoucher(v))
+        && (e.reviewed==false || installmentVoucher(v));
     }
     function installmentMutation(a,b) {
       let key=b.mutationKey;

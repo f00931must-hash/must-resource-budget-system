@@ -17,8 +17,8 @@ test('no legacy record changes and zero additional charge for children',()=>{
 test('mode remains locked after deleting all entries; empty unused mode can turn off',()=>{
  const r=parent();assert.equal(mutateInstallment(r,'disable').enabled,false);r.installment=mutateInstallment(r,'save','one',entry);r.installment=mutateInstallment(r,'delete','one');assert.equal(r.installment.total,0);assert.throws(()=>mutateInstallment(r,'disable'));
 });
-test('rejects missing evidence, overdraw, negative amount and non-manager review',()=>{
- const r=parent();assert.throws(()=>mutateInstallment(r,'save','one',{...entry,amount:140001}));assert.throws(()=>mutateInstallment(r,'save','one',{...entry,amount:-1}));assert.throws(()=>mutateInstallment(r,'save','one',{...entry,voucher:null}));
+test('rejects invalid evidence, overdraw, negative amount and non-manager review',()=>{
+ const r=parent();assert.throws(()=>mutateInstallment(r,'save','one',{...entry,amount:140001}));assert.throws(()=>mutateInstallment(r,'save','one',{...entry,amount:-1}));assert.throws(()=>mutateInstallment(r,'save','one',{...entry,voucher:{url:'javascript:invalid'}}));
  r.installment=mutateInstallment(r,'save','one',entry);assert.throws(()=>mutateInstallment(r,'review','one',null,false));
 });
 test('editing replaces one amount; manager review locks edits until explicit unlock',()=>{
@@ -34,4 +34,13 @@ test('dashboard buckets add to occupation before and after closure without dupli
  assert.deepEqual(installmentBuckets(r),{approved:8000,pending:0,reserved:132000});
  r.installment=mutateInstallment(r,'close','',null,true);
  assert.deepEqual(installmentBuckets(r),{approved:8000,pending:0,reserved:0});
+});
+
+test('save without attachment or confirmation, then supplement attachment on same entry',()=>{
+ const r=parent();const draft={date:entry.date,purpose:entry.purpose,amount:entry.amount,reimbursementNo:'',voucher:null};
+ r.installment=mutateInstallment(r,'save','draft',draft);assert.equal(r.installment.total,8000);assert.equal(r.installment.entries.draft.voucher,null);
+ assert.equal(reconciliationParts(r).reduce((sum,x)=>sum+x.amount,0),140000);
+ assert.throws(()=>mutateInstallment(r,'review','draft',null,true),/補上單據/);
+ r.installment=mutateInstallment(r,'save','draft',{...draft,voucher:entry.voucher});assert.equal(r.installment.total,8000);
+ r.installment=mutateInstallment(r,'review','draft',null,true);assert.equal(r.installment.reviewedTotal,8000);
 });

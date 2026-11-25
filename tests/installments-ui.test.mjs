@@ -29,7 +29,7 @@ test('existing ordinary records are never converted or written on form sync',asy
 test('actual dialog saves child evidence, keeps parent occupation, then manager reviews and closes',async()=>{
  const p=await page(true);try{
  await p.api.save(null);p.$('recordList').innerHTML=p.api.markup(p.state.records[0]);p.w.document.querySelector('[data-installment]').click();await tick();
- p.$('instPurpose').value='耗材';p.$('instAmount').value='8000';p.$('instNumber').value='G12345678';p.$('instConfirmed').checked=true;
+ p.$('instPurpose').value='耗材';p.$('instAmount').value='8000';p.$('instNumber').value='G12345678';
  Object.defineProperty(p.$('instFile'),'files',{value:[new p.w.File(['fake'],'fake.pdf',{type:'application/pdf'})]});
  await p.$('installmentEntryForm').onsubmit({preventDefault(){}});
  let parent=p.state.records[0];assert.equal(parent.installment.total,8000);assert.equal(core.occupiedAmount(parent),140000);assert.equal(Object.values(parent.installment.entries)[0].voucher.url,'https://example.test/fake.pdf');
@@ -39,9 +39,10 @@ test('actual dialog saves child evidence, keeps parent occupation, then manager 
  assert.ok(p.writes.every(x=>x.col==='expenseRecords'));assert.ok(!p.errors.some(x=>x.includes('失敗')));
  }finally{p.dom.window.close();}
 });
-test('teacher has no review or close controls and upload-less save fails visibly',async()=>{
+test('teacher can save without attachment or checkbox and sees pending evidence',async()=>{
  const p=await page();try{await p.api.save(null);p.$('recordList').innerHTML=p.api.markup(p.state.records[0]);p.w.document.querySelector('[data-installment]').click();await tick();assert.equal(p.$('instCloseCase'),null);assert.equal(p.w.document.querySelector('[data-action="review"]'),null);
- p.$('instPurpose').value='耗材';p.$('instAmount').value='8000';p.$('instConfirmed').checked=true;await p.$('installmentEntryForm').onsubmit({preventDefault(){}});assert.equal(p.writes.length,1);assert.match(p.errors.at(-1),/單據/);
+ p.$('instPurpose').value='耗材';p.$('instAmount').value='8000';await p.$('installmentEntryForm').onsubmit({preventDefault(){}});assert.equal(p.writes.length,2);assert.equal(p.state.records[0].installment.total,8000);assert.match(p.$('installmentDialog').textContent,/待補單據/);assert.equal(p.$('instConfirmed'),null);
+ p.w.document.querySelector('[data-edit]').click();Object.defineProperty(p.$('instFile'),'files',{value:[new p.w.File(['fake'],'later.pdf',{type:'application/pdf'})]});await p.$('installmentEntryForm').onsubmit({preventDefault(){}});assert.equal(p.state.records[0].installment.total,8000);assert.equal(Object.keys(p.state.records[0].installment.entries).length,1);assert.equal(Object.values(p.state.records[0].installment.entries)[0].voucher.url,'https://example.test/fake.pdf');
  }finally{p.dom.window.close();}
 });
 
