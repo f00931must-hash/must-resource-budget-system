@@ -465,8 +465,9 @@ function render(){
   }
 
   const aa=allocations.filter(a=>a.batchId===b.id&&a.deleted!==true);
-  let estimateTotal=0,actualTotal=0,projectedTotal=0,actualCount=0;
+  let originalAssignedTotal=0,estimateTotal=0,actualTotal=0,projectedTotal=0,actualCount=0;
   for(const a of aa){
+    originalAssignedTotal+=num(a.estimatedAmount);
     estimateTotal+=grossAdvance(a);
     const r=recordForAllocation(a);
     if(r&&isActual(r)){actualTotal+=num(r.amount)+num(r.advanceTopUpTotal);projectedTotal+=num(r.amount)+num(r.advanceTopUpTotal);actualCount++;}
@@ -482,11 +483,11 @@ function render(){
     ["預支／動支總額",money.format(total)],
     ["累計已領",money.format(receivedSum)],
     ["尚未領得",money.format(total-receivedSum)],
-    ["已分配（含追加）",money.format(estimateTotal)],
-    ["已實際支用",money.format(actualTotal)],
+    ["已分配（不含追加）",money.format(originalAssignedTotal)],
+    ["已實際支用",money.format(actualTotal),"已轉實際的連結紀錄合計（含待核對、已核銷及追加）；不含仍為預估的紀錄。"],
     ["待重新分配",money.format(realloc)],
     ["實際剩餘金額",money.format(receivedSum-estimateTotal+returnedTotal)]
-  ].map(([l,v])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong></div>`).join("");
+  ].map(([l,v,note])=>`<div class="summary-card"><span>${l}</span><strong>${v}</strong>${note?`<small style="display:block;margin-top:6px">${note}</small>`:""}</div>`).join("");
 
   const assignedTeachers=new Map();
   for(const a of aa){
