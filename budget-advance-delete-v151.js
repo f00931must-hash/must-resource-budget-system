@@ -1,3 +1,4 @@
+import {unlinkInstallmentAllocation} from './budget-installment-advance.mjs?v=20261125-1';
 import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget advance manager-only delete controls v1.5.6
 // 1) Batch deletion is manager-only and blocked while active allocations remain.
@@ -7,7 +8,7 @@ import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-p
 
 import { getApps } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, getDocs, collection, query, where, writeBatch, updateDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, getDocs, collection, query, where, writeBatch, runTransaction, updateDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
 const PROJECT_ID="must-resource-budget-system";
 let auth=null,db=null,currentEmail="",manager=false;
@@ -173,6 +174,19 @@ async function deleteAllocation(id){
     if(a.expenseRecordId){
       rSnap=await getDoc(doc(db,"expenseRecords",a.expenseRecordId));
       if(rSnap.exists())r=rSnap.data();
+    }
+
+    if(a.recordOrigin==='installment-item'){
+      if(!confirm('解除此細項的預支分配？核銷細項、單據與主紀錄都會保留。'))return;
+      await runTransaction(db,async tx=>{
+        const ar=doc(db,'advanceAllocations',id),as=await tx.get(ar);
+        if(!as.exists())throw Error('找不到分配');
+        const fresh={id,...as.data()},rr=doc(db,'expenseRecords',fresh.expenseRecordId),rs=await tx.get(rr);
+        if(!rs.exists())throw Error('找不到原主紀錄');
+        const next=unlinkInstallmentAllocation(rs.data(),fresh),now=serverTimestamp();
+        tx.update(rr,{installment:next,updatedAt:now,updatedBy:email});
+        tx.update(ar,{deleted:true,deletedAt:now,deletedBy:email,updatedAt:now,updatedBy:email});
+      });requestAdvanceRefresh();return;
     }
 
     // If the source usage record was already deleted/recycled, this allocation is an orphan.

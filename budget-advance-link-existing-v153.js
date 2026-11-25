@@ -1,3 +1,4 @@
+import {installmentAdvanceCandidates,linkInstallmentAllocation} from './budget-installment-advance.mjs?v=20261125-1';
 import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
 // Budget advance allocation -> existing estimated usage record v1.5.3
 // New allocation flow: manager selects an existing estimated expense record.
@@ -58,9 +59,9 @@ function installDialog(){
   <dialog id="advanceExistingEstimateDialog"><form id="advanceExistingEstimateForm" method="dialog" class="dialog-form">
     <div class="dialog-head"><h3 id="advanceExistingEstimateTitle">分配既有預估</h3><button type="button" class="icon-btn" id="advanceExistingEstimateClose">×</button></div>
     <input type="hidden" id="advanceExistingAllocationId" />
-    <label>選擇使用紀錄中的預估
+    <label>選擇使用紀錄預估／分次核銷細項
       <select id="advanceExistingRecordSelect" required><option value="">讀取中…</option></select>
-      <small id="advanceExistingRecordHint" class="muted">只會顯示目前批次所選經費科目、同學期，且尚未被其他預支批次綁定的預估紀錄。</small>
+      <small id="advanceExistingRecordHint" class="muted">顯示同經費項目、同學期的未分配預估與分次核銷細項。選取細項不會另外新增使用紀錄。</small>
     </label>
     <div id="advanceExistingRecordPreview" class="panel" style="margin:0;padding:14px"><div class="muted">請先選擇一筆預估紀錄。</div></div>
     <label>備註<textarea id="advanceExistingNote" rows="3" maxlength="300"></textarea></label>
@@ -103,9 +104,9 @@ async function loadCandidates(editAllocation=null){
   const activeAllocations=aSnap.docs.map(d=>({id:d.id,...d.data()})).filter(a=>a.deleted!==true);
   const usedRecordIds=new Set(activeAllocations.filter(a=>!editAllocation||a.id!==editAllocation.id).map(a=>a.expenseRecordId).filter(Boolean));
   const all=rSnap.docs.map(d=>({id:d.id,...d.data()}));
-  availableRecords=all.filter(r=>
+  availableRecords=installmentAdvanceCandidates(all).filter(r=>
     (!ownOnly||r.ownerEmail===currentEmail) && r.deleted!==true &&
-    r.estimated===true && r.installment?.enabled!==true &&
+    r.estimated===true && (!r.installment?.enabled||r._installmentEntryId) &&
     !approved(r) &&
     batchCategoryIds(batch).includes(String(r.categoryId||"")) &&
     r.semester===batch.semester &&
@@ -188,9 +189,20 @@ async function saveLink(e){
       const aRef=doc(collection(db,"advanceAllocations"));
       phase="重新讀取預估與批次";
       await runTransaction(db,async tx=>{
-      const latest=await tx.get(doc(db,"expenseRecords",r.id)),bs=await tx.get(doc(db,"advanceBatches",bid));
+      const latest=await tx.get(doc(db,"expenseRecords",r._installmentParentId||r.id)),bs=await tx.get(doc(db,"advanceBatches",bid));
       if(!latest.exists()||!bs.exists()||bs.data().deleted===true)throw Error("資料已變更，請重試");
       const fresh=latest.data();
+      if(r._installmentEntryId){
+        const parent={id:r._installmentParentId,...fresh},batch={id:bid,...bs.data()};
+        if(ownOnly&&(parent.ownerEmail!==email||batch.handlerEmail!==email))throw Error("只能分配自己的細項至自己的批次");
+        const result=linkInstallmentAllocation(parent,r._installmentEntryId,batch,aRef.id,email,serverTimestamp(),$("advanceExistingNote").value.trim());
+        if(result.allocation.estimatedAmount!==num(r.amount))throw Error("細項金額已變更，請重新選取");
+        result.allocation.categoryName=batchCategoryLabel(batch,parent.categoryId);
+        tx.set(aRef,result.allocation);
+        tx.update(doc(db,"expenseRecords",parent.id),{installment:result.installment,updatedAt:serverTimestamp(),updatedBy:email});
+        return;
+      }
+
       if(fresh.installment?.enabled||fresh.advanceAllocationId||fresh.deleted===true||fresh.estimated!==true||approved(fresh)||Number(fresh.amount)!==num(r.amount))throw Error("預估已變更或已分配，請重新選取");
       if(fresh.ownerEmail!==r.ownerEmail||fresh.categoryId!==r.categoryId||fresh.planId!==p||fresh.semester!==b.semester)throw Error("預估內容已變更，請重試");
       if(ownOnly&&(fresh.ownerEmail!==email||bs.data().handlerEmail!==email))throw Error("只能分配自己的紀錄");

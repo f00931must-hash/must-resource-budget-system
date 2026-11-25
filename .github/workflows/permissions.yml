@@ -24,11 +24,11 @@ jobs:
       - name: Install diagnostic DOM test dependency (development only)
         run: npm install --prefix .emulator --no-save jsdom@26
       - name: Diagnostic account safety, privacy and UI
-        run: node --test tests/installments-ui.test.mjs tests/installments.test.mjs tests/advance-net-totals.test.mjs tests/permission-diagnostics.test.mjs tests/permission-diagnostics-ui.test.mjs
+        run: node --test tests/installment-advance.test.mjs tests/installments-ui.test.mjs tests/installments.test.mjs tests/advance-net-totals.test.mjs tests/permission-diagnostics.test.mjs tests/permission-diagnostics-ui.test.mjs
       - name: Role, upload authorization and loader contracts
         run: node --test tests/budget-role-policy.test.mjs tests/budget-upload-policy.test.mjs tests/budget-notify-policy.test.mjs tests/budget-loader.test.mjs
       - name: Frontend undefined-name check
-        run: npx --yes eslint@9.39.1 app-v120.js budget-installments-core.mjs budget-installments-ui.mjs budget-permissions.mjs budget-diagnostics-core.mjs budget-permission-diagnostics-v1.js budget-advance-v150.js budget-advance-link-existing-v153.js budget-advance-delete-v151.js budget-split-payout.js budget-advance-settlement.js budget-admin-clean-v140.js budget-manager-waiver-click-v139.js budget-no-voucher-request-v137.js budget-my-advance-v170.js budget-attachment-delete-v126.js budget-trash-v128.js budget-trash-plan-restore-v128.js budget-reminder-v160.js
+        run: npx --yes eslint@9.39.1 app-v120.js budget-installment-advance.mjs budget-installments-core.mjs budget-installments-ui.mjs budget-permissions.mjs budget-diagnostics-core.mjs budget-permission-diagnostics-v1.js budget-advance-v150.js budget-advance-link-existing-v153.js budget-advance-delete-v151.js budget-split-payout.js budget-advance-settlement.js budget-admin-clean-v140.js budget-manager-waiver-click-v139.js budget-no-voucher-request-v137.js budget-my-advance-v170.js budget-attachment-delete-v126.js budget-trash-v128.js budget-trash-plan-restore-v128.js budget-reminder-v160.js
       - name: Entire emulator permission and actual-handler suite
         run: python scripts/test-permissions.py
       - name: Test report and synthetic emulator logs

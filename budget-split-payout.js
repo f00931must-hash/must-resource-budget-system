@@ -45,7 +45,7 @@ async function addDialog(id){
   await runTransaction(db,async tx=>{
    const ar=doc(db,'advanceAllocations',id),as=await tx.get(ar);if(!as.exists())throw Error('分配已移除');const p=as.data();
    const bs=await tx.get(doc(db,'advanceBatches',p.batchId)),rs=await tx.get(doc(db,'expenseRecords',p.expenseRecordId));
-   if(p.deleted||p.allocationReceivedConfirmed||p.refundReported||!bs.exists()||bs.data().deleted||!rs.exists()||rs.data().deleted||rs.data().advanceAllocationId!==id)throw Error('此筆已領款、已退款或連結已變更，不能拆分');
+   if(p.deleted||p.allocationReceivedConfirmed||p.refundReported||!bs.exists()||bs.data().deleted||!rs.exists()||rs.data().deleted||(p.recordOrigin==='installment-item'?rs.data().installment?.entries?.[p.installmentEntryId]?.advanceAllocationId!==id:rs.data().advanceAllocationId!==id))throw Error('此筆已領款、已退款或連結已變更，不能拆分');
    if(role!=='manager'&&(bs.data().handlerEmail!==email||p.ownerEmail!==email))throw Error('沒有分配權限');
    const assigned=amount(p.splitAssigned)+value;if(assigned>amount(p.estimatedAmount))throw Error('合計不可超過原分配金額');
    const stamp={updatedAt:serverTimestamp(),updatedBy:email};
@@ -76,10 +76,13 @@ export async function splitAction(button){
   }else if(action==='refund-receive'){
    const delta=amount(p.refundPending);if(!reviewer||delta<=0)throw Error('沒有待確認退款或無權限');
    const rr=doc(db,'expenseRecords',p.expenseRecordId),rs=await tx.get(rr),next=amount(a.splitRefundTotal)+delta;
-   if(!rs.exists()||rs.data().deleted||rs.data().advanceAllocationId!==p.allocationId||amount(rs.data().amount)!==amount(a.estimatedAmount)-amount(a.splitRefundTotal))throw Error('使用紀錄金額已變更，請重新確認');
+   const installmentItem=a.recordOrigin==='installment-item';
+   if(installmentItem){
+    if(!rs.exists()||rs.data().deleted||rs.data().installment?.entries?.[a.installmentEntryId]?.advanceAllocationId!==p.allocationId)throw Error('細項連結已變更，請重新確認');
+   }else if(!rs.exists()||rs.data().deleted||rs.data().advanceAllocationId!==p.allocationId||amount(rs.data().amount)!==amount(a.estimatedAmount)-amount(a.splitRefundTotal))throw Error('使用紀錄金額已變更，請重新確認');
    const history={...(p.refundHistory||{})};history['r'+(Object.keys(history).length+1)]={amount:delta,at:serverTimestamp(),by:email};
    tx.update(pr,{refundTotal:amount(p.refundTotal)+delta,refundPending:0,refundHistory:history,refundReceivedBy:email,refundReceivedAt:serverTimestamp(),...stamp});
-   tx.update(ar,{splitRefundTotal:next,...parentStamp});tx.update(rr,{amount:amount(a.estimatedAmount)-next,...stamp});
+   tx.update(ar,{splitRefundTotal:next,...parentStamp});if(!installmentItem)tx.update(rr,{amount:amount(a.estimatedAmount)-next,...stamp});
   }else throw Error('未知操作');
  });refresh();}finally{button.disabled=false;}
 }

@@ -76,7 +76,7 @@ service cloud.firestore {
             && after.refundTotal==before.refundTotal+before.refundPending
             && b.splitAssigned==a.splitAssigned && b.splitUnreceived==a.splitUnreceived
             && b.splitRefundTotal==a.splitRefundTotal+before.refundPending
-            && getAfter(/databases/$(database)/documents/expenseRecords/$(a.expenseRecordId)).data.amount==a.estimatedAmount-b.splitRefundTotal
+            && (a.get('recordOrigin','')=='installment-item' || getAfter(/databases/$(database)/documents/expenseRecords/$(a.expenseRecordId)).data.amount==a.estimatedAmount-b.splitRefundTotal)
           ))
         ) : (
           payoutReviewer(a) && after.createdBy==email() && after.amount is int && after.amount>0
@@ -319,6 +319,43 @@ service cloud.firestore {
     // Managers manage all allocations. Regular users may read only their own allocation
     // and may only confirm that the allocated amount was received.
 
+    function installmentAllocationCreate(aid) {
+      let d=request.resource.data;
+      let p=get(/databases/$(database)/documents/expenseRecords/$(d.expenseRecordId)).data;
+      let q=getAfter(/databases/$(database)/documents/expenseRecords/$(d.expenseRecordId)).data;
+      let b=get(/databases/$(database)/documents/advanceBatches/$(d.batchId)).data;
+      let e=p.installment.entries[d.installmentEntryId];
+      return enabledUser() && (manager() || ownAllocation(d))
+        && d.keys().hasOnly(['planId','batchId','expenseRecordId','installmentEntryId','categoryId','categoryName','ownerEmail','ownerName','purpose','estimatedAmount','note','recordOrigin','payoutSplit','splitAssigned','splitUnreceived','splitRefundTotal','splitRecipients','deleted','createdBy','createdAt','updatedBy','updatedAt'])
+        && p.get('deleted',false)==false && p.installment.enabled==true && p.installment.closed==false
+        && e.get('advanceAllocationId','')==''
+        && q.installment.entries[d.installmentEntryId].advanceAllocationId==aid
+        && d.planId==p.planId && d.categoryId==p.categoryId && d.ownerEmail==p.ownerEmail
+        && d.estimatedAmount==e.amount && d.estimatedAmount is int && d.estimatedAmount>0
+        && b.get('deleted',false)==false && b.planId==p.planId && b.semester==p.semester
+        && (b.get('categoryIds',[]) is list && b.get('categoryIds',[]).size()>0 ? d.categoryId in b.categoryIds : d.categoryId==b.get('categoryId',''))
+        && d.payoutSplit==true && d.splitAssigned==0 && d.splitUnreceived==0 && d.splitRefundTotal==0 && d.splitRecipients=={}
+        && d.deleted==false && d.createdBy==email() && d.createdAt==request.time
+        && d.updatedBy==email() && d.updatedAt==request.time;
+    }
+    function installmentAllocationLink(recordId,a,b) {
+      let key=b.mutationKey;
+      let before=a.entries.get(key,{});
+      let after=b.entries.get(key,{});
+      let oldId=before.get('advanceAllocationId','');
+      let newId=after.get('advanceAllocationId','');
+      let aid=newId!=''?newId:oldId;
+      let d=getAfter(/databases/$(database)/documents/advanceAllocations/$(aid)).data;
+      return before!={} && after!={} && oldId!=newId
+        && (manager() || ownAllocation(d))
+        && b.diff(a).affectedKeys().hasOnly(['entries','mutationKey'])
+        && b.entries.diff(a.entries).affectedKeys().hasOnly([key])
+        && after.diff(before).affectedKeys().hasOnly(['advanceAllocationId'])
+        && d.recordOrigin=='installment-item' && d.expenseRecordId==recordId && d.installmentEntryId==key
+        && (newId!='' ? (oldId=='' && d.deleted==false && d.estimatedAmount==before.amount)
+          : (oldId!='' && d.deleted==true && d.splitAssigned==0));
+    }
+
     function allocationTopUp(allocationId) {
       return managerAdvanceTopUp()
         && getAfter(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data.advanceAllocationId == allocationId
@@ -343,9 +380,9 @@ service cloud.firestore {
         && resource.data.get('splitAssigned', 0) == 0 && request.resource.data.deleted == true
         && request.resource.data.deletedBy == email() && request.resource.data.deletedAt == request.time
         && changed().hasOnly(['deleted','deletedAt','deletedBy','updatedAt','updatedBy','orphanSourceRemoved'])
-        && (!exists(/databases/$(database)/documents/expenseRecords/$(rid))
+        && (resource.data.get('recordOrigin','')=='installment-item' ? getAfter(/databases/$(database)/documents/expenseRecords/$(rid)).data.installment.entries[resource.data.installmentEntryId].get('advanceAllocationId','')=='' : (!exists(/databases/$(database)/documents/expenseRecords/$(rid))
           || get(/databases/$(database)/documents/expenseRecords/$(rid)).data.get('deleted', false)
-          || getAfter(/databases/$(database)/documents/expenseRecords/$(rid)).data.get('advanceAllocationId', '') == '');
+          || getAfter(/databases/$(database)/documents/expenseRecords/$(rid)).data.get('advanceAllocationId', '') == ''));
     }
     function allocationAdjustmentSettlement() {
       let before=get(/databases/$(database)/documents/expenseRecords/$(resource.data.expenseRecordId)).data;
@@ -376,7 +413,7 @@ service cloud.firestore {
         || (enabledUser() && resource.data.ownerEmail == email())
         || (advanceOfficer() && ownBatch(get(/databases/$(database)/documents/advanceBatches/$(resource.data.batchId)).data))
         || (enabledUser() && resource.data.get('splitRecipients',{}).get(email(),false)==true);
-      allow create: if manager() || (ownAllocation(request.resource.data)
+      allow create: if request.resource.data.get('recordOrigin','')=='installment-item' ? installmentAllocationCreate(allocationId) : manager() || (ownAllocation(request.resource.data)
         && request.resource.data.keys().hasOnly(['planId','batchId','expenseRecordId','categoryId','categoryName','ownerEmail','ownerName','purpose','estimatedAmount','note','recordOrigin','deleted','createdAt','createdBy','updatedAt','updatedBy'])
         && request.resource.data.createdBy == email()
         && request.resource.data.get('deleted', false) != true
@@ -776,7 +813,7 @@ service cloud.firestore {
     }
     function installmentEntry(e) {
       let v=e.get('voucher',null);
-      return e is map && e.keys().hasOnly(['date','purpose','amount','reimbursementNo','voucher','confirmed','reviewed'])
+      return e is map && e.keys().hasOnly(['date','purpose','amount','reimbursementNo','voucher','confirmed','reviewed','advanceAllocationId'])
         && e.date is string && e.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
         && e.purpose is string && e.purpose.size()>0 && e.purpose.size()<=300
         && e.amount is int && e.amount>0 && e.reimbursementNo is string && e.reimbursementNo.size()<=100
@@ -793,6 +830,8 @@ service cloud.firestore {
       return key is string && key.size()>0 && key.size()<=100
         && b.entries.diff(a.entries).affectedKeys().hasOnly([key])
         && b.entries.diff(a.entries).affectedKeys().size()==1
+        && old.get('advanceAllocationId','')==next.get('advanceAllocationId','')
+        && (old.get('advanceAllocationId','')=='' || (!removed && next.amount==old.amount))
         && (!removed || (!added && old.reviewed==false))
         && (removed || installmentEntry(next))
         && (added ? next.reviewed==false :
@@ -802,7 +841,7 @@ service cloud.firestore {
         && b.reviewedTotal==a.reviewedTotal-(old.get('reviewed',false)?old.amount:0)+(next.get('reviewed',false)?next.amount:0)
         && b.everUsed==true && b.enabled==true && b.closed==false;
     }
-    function installmentUpdate() {
+    function installmentUpdate(recordId) {
       let a=resource.data.installment;
       let b=request.resource.data.installment;
       return enabledUser() && (manager() || resource.data.ownerEmail==email())
@@ -817,12 +856,12 @@ service cloud.firestore {
           && ((b.enabled==a.enabled && b.closed==a.closed)
             || (a.everUsed==false && b.enabled==false && b.closed==false)
             || (manager() && b.enabled==true && b.closed==true && b.total==b.reviewedTotal)))
-          || installmentMutation(a,b));
+          || installmentMutation(a,b) || installmentAllocationLink(recordId,a,b));
     }
 
     function expenseUpdate(recordId) {
       let k = changed();
-      return resource.data.get('installment',{}).get('enabled',false) || k.hasAny(['installment']) ? installmentUpdate()
+      return resource.data.get('installment',{}).get('enabled',false) || k.hasAny(['installment']) ? installmentUpdate(recordId)
         : k.hasAny(['advanceAllocationId']) ?
           (linked(request.resource.data) ? linkExistingEstimate(recordId) : expenseUnlink())
         : k.hasAny(['advanceTopUpTotal']) ? expenseTopUp(recordId)

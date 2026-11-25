@@ -21,13 +21,15 @@ export function mutateInstallment(record,action,id,item,manager=false){
   if(action==='review'&&!old.voucher?.url)throw Error('請先補上單據再核對完成');
   next.entries[id]={...old,reviewed:action==='review'};
  }else if(action==='delete'){
+  if(old?.advanceAllocationId)throw Error('此細項已連結預支，請先解除分配');
   if(!old||old.reviewed)throw Error('已核對明細須由管理員先解鎖');
   delete next.entries[id];
  }else{
   if(old?.reviewed)throw Error('已核對明細須先解鎖');
   if(!Number.isSafeInteger(item.amount)||item.amount<=0||!item.purpose?.trim()||!/^\d{4}-\d{2}-\d{2}$/.test(item.date))throw Error('請填日期、用途與正整數金額');
   if(item.voucher && !item.voucher.url?.startsWith('https://'))throw Error('單據連結格式不正確');
-  next.entries[id]={...item,reviewed:false};
+  if(old?.advanceAllocationId&&item.amount!==old.amount)throw Error('此細項已連結預支，金額鎖定；附件仍可補上');
+  next.entries[id]={...item,reviewed:false,...(old?.advanceAllocationId?{advanceAllocationId:old.advanceAllocationId}:{})};
  }
  const updated=next.entries[id];
  next.total=s.total-(old?.amount||0)+(updated?.amount||0);

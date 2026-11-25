@@ -1,5 +1,5 @@
-const {isInstallment,occupiedAmount,reconciliationParts,installmentRows,installmentBuckets}=await import(new URL('./budget-installments-core.mjs?v=20261125-1',location.href).href);
-const {installInstallments}=await import(new URL('./budget-installments-ui.mjs?v=20261125-1',location.href).href);
+const {isInstallment,occupiedAmount,reconciliationParts,installmentRows,installmentBuckets}=await import(new URL('./budget-installments-core.mjs?v=20261125-advance',location.href).href);
+const {installInstallments}=await import(new URL('./budget-installments-ui.mjs?v=20261125-advance',location.href).href);
 const {isBudgetManager} = await import(new URL("./budget-permissions.mjs", location.href).href);
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
