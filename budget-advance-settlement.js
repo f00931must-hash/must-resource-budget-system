@@ -6,7 +6,7 @@ const money=new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maxim
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 export function refundDue(a,r){return a.refundReported===true?Number(a.refundAmount||0):0;}
 function refunded(a){return Number(a.refundConfirmedTotal ?? (a.refundReceivedConfirmed===true?a.refundAmount:0))||0;}
-export function confirmedRefund(a,r){const total=a.payoutSplit?Number(a.splitRefundTotal||0):refunded(a);return r&&Number(r.amount)===Number(a.estimatedAmount)-total?total:0;}
+export function confirmedRefund(a,r){if(a.recordOrigin==='installment-item')return Number(a.splitRefundTotal||0);const total=a.payoutSplit?Number(a.splitRefundTotal||0):refunded(a);return r&&Number(r.amount)===Number(a.estimatedAmount)-total?total:0;}
 export function settlementMarkup(a,r,manager=false,selfManage=false){
  if(a.payoutSplit)return "";
  if(!r||a.allocationReceivedConfirmed!==true)return "";

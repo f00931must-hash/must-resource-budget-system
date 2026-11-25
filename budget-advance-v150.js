@@ -1,7 +1,8 @@
+import {installmentAllocationRecord} from './budget-installment-advance.mjs?v=20261125-1';
 import {grossAdvance,netAdvance} from "./budget-advance-totals.mjs?v=20261124-net";
 import {budgetRole,isBudgetManager,canUseAdvance,isAdvanceOnly} from "./budget-permissions.mjs";
-import {loadSplitPayouts,splitPending,splitMarkup,splitAction} from "./budget-split-payout.js?v=permissions-20261120";
-import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=permissions-20261120";
+import {loadSplitPayouts,splitPending,splitMarkup,splitAction} from "./budget-split-payout.js?v=20261125-items";
+import {settlementMarkup,settlementAction,confirmedRefund} from "./budget-advance-settlement.js?v=20261125-items";
 // Budget advance / disbursement manager module v1.7.7
 // First layer: manager creates one advance batch for a semester/category.
 // Second layer: manager allocates estimated activity amounts to teachers.
@@ -45,7 +46,7 @@ function rememberBatch(){
 }
 function savedBatch(){try{return sessionStorage.getItem(batchSelectionKey())||"";}catch{return "";}}
 function currentBatch(){return batches.find(x=>x.id===activeBatchId)||null;}
-function recordForAllocation(a){return records.find(r=>r.id===a.expenseRecordId)||null;}
+function recordForAllocation(a){return installmentAllocationRecord(a,records);}
 function isApproved(r){return !!r&&(r.reviewStatus==="approved"||r.reviewed===true||r.locked===true);}
 function isActual(r){return !!r&&r.estimated!==true;}
 
@@ -545,7 +546,7 @@ function render(){
       <div><small>差額</small>${varianceHtml}<small>${esc(status)}</small>${settlementMarkup(a,r,true)}</div>
       <div>${!a.payoutSplit&&!receiptConfirmed&&(!ownOnly||String(a.ownerEmail||"").toLowerCase()===currentEmail)?`<button class="primary-btn" data-manager-own-receipt="${a.id}">${String(a.ownerEmail||"").toLowerCase()===currentEmail?"確認收到分配金額":"代登已領款"}</button>`:""}${canEdit?`<button class="link-btn" data-edit-advance-allocation="${a.id}">調整</button>`:""}</div>
       <div><small>追加預支</small> <strong>${money.format(a.advanceTopUpTotal||0)}</strong> ・ 已確認退款 ${money.format(returned)} ・ 淨預支合計 ${money.format(net)}
-      ${!ownOnly&&r?'<button type="button" class="link-btn" data-advance-topup="'+escAttr(a.id)+'">登記追加預支</button>':""}</div>
+      ${!ownOnly&&r&&a.recordOrigin!=='installment-item'?'<button type="button" class="link-btn" data-advance-topup="'+escAttr(a.id)+'">登記追加預支</button>':""}</div>
       ${splitMarkup(a,splitPayouts)}
     </div>`;
   }).join("");
@@ -607,6 +608,7 @@ init();
 
 
 async function addAdvanceTopUp(id,button){
+  if(allocations.find(a=>a.id===id)?.recordOrigin==="installment-item")throw Error("分次核銷細項金額已鎖定，請先處理原細項，不可另外追加到主紀錄。");
   if(ownOnly||button.disabled)return;
   const input=prompt("請輸入這次已補發的預支金額（整數元）");
   if(input===null)return;
