@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -35,6 +36,26 @@ jobs:
         with:
           path: "."
           name: github-pages-${{ github.run_attempt }}
+
+      - name: Wait for uploaded artifact metadata
+        uses: actions/github-script@v7
+        env:
+          BUDGET_PAGES_ARTIFACT: github-pages-${{ github.run_attempt }}
+        with:
+          script: |
+            const name = process.env.BUDGET_PAGES_ARTIFACT;
+            for (let attempt = 0; attempt < 12; attempt++) {
+              const response = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner, repo: context.repo.repo,
+                run_id: context.runId, name
+              });
+              const found = response.data.artifacts.filter(a => a.name === name && !a.expired);
+              if (found.length === 1) { core.info('Pages artifact metadata is ready.'); return; }
+              if (found.length > 1) throw new Error('Duplicate Pages artifact metadata.');
+              core.info('Waiting for Pages artifact metadata...');
+              await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+            throw new Error('Uploaded Pages artifact metadata did not become available.');
 
       - name: Deploy to GitHub Pages
         id: deployment
